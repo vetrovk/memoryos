@@ -1,0 +1,12 @@
+[project]
+name = "memoryos-local"
+version = "0.1.0"
+description = "Local first Markdown and SQLite personal memory system."
+requires-python = ">=3.9"
+dependencies = []
+
+[project.scripts]
+memory = "memoryos.cli:main"
+
+[tool.setuptools]
+packages = ["memoryos"]

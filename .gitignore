@@ -1,0 +1,37 @@
+# Local runtime artifacts
+__pycache__/
+.pycache/
+*.pyc
+.DS_Store
+.env
+.env.*
+!.env.example
+
+# Do not commit local memory data if MEMORY_HOME points into this repository.
+Memory/
+00_inbox/
+10_projects/
+20_people/
+30_company/
+40_health/
+50_ai/
+60_guides/
+70_decisions/
+80_errors/
+90_archive/
+_system/
+exports/
+drafts/
+cache/
+logs/
+
+# SQLite, logs, exports
+*.sqlite
+*.sqlite3
+*.sqlite3-*
+*.db
+*.log
+context_*.md
+*.pem
+*.key
+*.token

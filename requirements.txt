@@ -1,0 +1,1 @@
+# MemoryOS MVP intentionally uses only the Python standard library.

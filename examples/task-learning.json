@@ -1,0 +1,30 @@
+{
+  "project": "memoryos",
+  "goal": "Verify JSON task learning payload",
+  "actions": [
+    "Created a reusable JSON payload example",
+    "Verified memory learn --from-json"
+  ],
+  "changed_files": [
+    "examples/task-learning.json"
+  ],
+  "errors": [],
+  "decisions": [
+    "Keep the payload simple and standard-library friendly"
+  ],
+  "commands": [
+    "python3 -m memoryos.cli learn --from-json examples/task-learning.json"
+  ],
+  "findings": [
+    "JSON input is the most stable interface for external agents"
+  ],
+  "recommendations": [
+    "Agent adapters should emit this schema after successful tasks"
+  ],
+  "tags": [
+    "example",
+    "task-learning"
+  ],
+  "source": "codex",
+  "actor": "codex"
+}
