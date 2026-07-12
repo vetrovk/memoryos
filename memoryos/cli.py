@@ -27,6 +27,10 @@ def build_parser() -> argparse.ArgumentParser:
     add_home(sub.add_parser("doctor"))
     add_home(sub.add_parser("stats"))
     add_home(sub.add_parser("graph"))
+    curator_stats = add_home(sub.add_parser("curator-stats"))
+    curator_stats.add_argument("--days", type=int, default=None)
+    cleanup = add_home(sub.add_parser("cleanup-generated"))
+    cleanup.add_argument("--dry-run", action="store_true")
     github_pr = add_home(sub.add_parser("github-pr"))
     github_pr.add_argument("url")
     github_pr.add_argument("--actor", default="agent")
@@ -85,6 +89,7 @@ def build_parser() -> argparse.ArgumentParser:
     learn.add_argument("--source", default="agent")
     learn.add_argument("--actor", default="agent")
     learn.add_argument("--status", default="active")
+    learn.add_argument("--outcome", default="")
     learn.add_argument("--related", default="")
     learn.add_argument("--cwd", default="")
     learn.add_argument("--test-results", default="")
@@ -161,6 +166,8 @@ def main(argv: list[str] | None = None) -> int:
                 dry_run=args.dry_run,
                 test_results=args.test_results,
                 goal=args.goal,
+                outcome=args.outcome,
+                findings=args.finding,
             )
             if args.dry_run:
                 print(memory.render_session_preview(result))
@@ -185,6 +192,22 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "graph":
         print(memory.graph(), end="")
+        return 0
+    if args.command == "curator-stats":
+        stats, events = memory.curator_stats(days=args.days)
+        for key, value in stats.items():
+            print(f"{key}: {value}")
+        print("\nLast curator decisions:")
+        if not events:
+            print("No curator audit events.")
+        for event in events:
+            print(f"- {event['created']} | {event['action']} | {event['reason'] or '-'}")
+        return 0
+    if args.command == "cleanup-generated":
+        if not args.dry_run:
+            parser.error("cleanup-generated currently supports only --dry-run")
+        for key, value in memory.cleanup_generated_dry_run().items():
+            print(f"{key}: {value}")
         return 0
     if args.command == "github-pr":
         result = memory.learn_from_github_pr(args.url, actor=args.actor, source=args.source)
@@ -240,6 +263,7 @@ def _learning_payload(args: argparse.Namespace) -> dict:
     payload.setdefault("source", args.source)
     payload.setdefault("actor", args.actor)
     payload.setdefault("status", args.status)
+    payload.setdefault("outcome", args.outcome or "completed")
     payload.setdefault("related", split_tags(args.related))
     if not payload.get("goal"):
         raise SystemExit("memory learn requires --goal or JSON field 'goal'.")

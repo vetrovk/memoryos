@@ -36,6 +36,11 @@ class TaskLearningInput:
     related: list[str] = field(default_factory=list)
     outcome: str = "completed"
     quality_score: int = 0
+    raw_changed_files_count: int = 0
+    useful_changed_files_count: int = 0
+    ignored_changed_files_count: int = 0
+    ignored_changed_file_examples: list[str] = field(default_factory=list)
+    curator_fingerprint: str = ""
 
 
 @dataclass
@@ -61,6 +66,12 @@ class SessionLearningPreview:
     last_commit: str = ""
     disposition: str = "permanent"
     reason: str = ""
+    raw_changed_files_count: int = 0
+    useful_changed_files_count: int = 0
+    ignored_changed_files_count: int = 0
+    ignored_changed_file_examples: list[str] = field(default_factory=list)
+    related_note_id: str = ""
+    related_note_path: str = ""
 
 
 @dataclass

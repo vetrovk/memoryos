@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 from pathlib import Path
 
 
@@ -83,3 +84,39 @@ def legacy_database_path(home: Path) -> Path:
 
 def log_path(home: Path) -> Path:
     return home / "_system" / "logs" / "memory.log"
+
+
+DEFAULT_CURATOR_CONFIG = {
+    "ignored_path_segments": [
+        ".git", "node_modules", "dist", "build", "out", ".next", ".nuxt",
+        ".cache", "cache", "tmp", "temp", ".tmp", ".venv", "venv",
+        "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+        "coverage", "htmlcov",
+    ],
+    "ignored_file_names": [".DS_Store", ".coverage"],
+    "ignored_suffixes": [".pyc", ".log"],
+    "ignored_name_suffixes": [".min.js", ".min.css", ".bundle.js", ".chunk.js"],
+    "near_duplicate_window_hours": 24,
+    "near_duplicate_similarity": 0.8,
+}
+
+
+def curator_config_path(home: Path) -> Path:
+    return home / "_system" / "config" / "curator.json"
+
+
+def load_curator_config(home: Path) -> dict:
+    config = {key: list(value) if isinstance(value, list) else value for key, value in DEFAULT_CURATOR_CONFIG.items()}
+    path = curator_config_path(home)
+    if not path.exists():
+        return config
+    try:
+        custom = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return config
+    if not isinstance(custom, dict):
+        return config
+    for key in config:
+        if key in custom and isinstance(custom[key], type(config[key])):
+            config[key] = custom[key]
+    return config

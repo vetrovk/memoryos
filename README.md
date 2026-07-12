@@ -188,6 +188,12 @@ MemoryOS больше не должна сохранять каждую акти
 - сохраняет сильные записи в постоянную память;
 - слабые записи сохраняет в `_system/drafts/` или пропускает с понятным сообщением.
 
+### Generated Files Are Activity Noise, Not Engineering Memory
+
+Перед scoring curator исключает generated/dependency пути: `node_modules/`, `dist/`, `build/`, `out/`, `.next/`, `.nuxt/`, cache/temporary folders, virtualenvs, bytecode, логи, `.DS_Store` и common minified bundles. Они не попадают в заметку, aliases, links, diff summary и fingerprint.
+
+Настройки можно переопределить локально в `~/Memory/_system/config/curator.json`; пример лежит в [examples/curator.json](examples/curator.json). `.github/` не исключается по умолчанию, поскольку CI/workflow изменения могут быть важной инженерной работой.
+
 Самый короткий путь для агента после завершения задачи:
 
 ```bash
@@ -215,7 +221,11 @@ memory drafts
 memory drafts review
 memory drafts promote <id>
 memory drafts drop <id>
+memory curator-stats --days 7
+memory cleanup-generated --dry-run
 ```
+
+Curator audit хранится в SQLite `history`: saved, draft, skipped, promote и drop решения записываются вместе с причиной, score и raw/useful/ignored file counts.
 
 После успешного завершения задачи агент может сохранить структурированную запись:
 

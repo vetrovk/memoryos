@@ -12,6 +12,7 @@
 - Launchd template without automatic activation.
 - Automatic task learning through `memory learn` and `memory learn --from-session`.
 - Memory Curator with quality score, outcome, drafts, duplicate/noise filtering.
+- Generated/dependency filtering, deterministic near-duplicate detection, and curator audit stats.
 - GitHub PR memory through optional `gh` CLI.
 
 ## Next

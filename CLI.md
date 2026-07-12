@@ -78,6 +78,8 @@ memory learn --from-session --actor codex --source codex --dry-run
 
 `--from-session` is curated before permanent save. It calculates `quality_score`, sets `outcome`, skips duplicates/no-signal sessions, and may save weak records to `_system/drafts/`.
 
+Generated files are activity noise, not engineering memory. The curator filters dependencies, build output, caches, temporary folders, Python bytecode, logs, `.DS_Store`, and common minified bundles before computing score, links, aliases, and session fingerprints. Customize defaults with `~/Memory/_system/config/curator.json`; see `examples/curator.json`.
+
 Draft commands:
 
 ```bash
@@ -85,7 +87,11 @@ memory drafts
 memory drafts review
 memory drafts promote <id>
 memory drafts drop <id>
+memory curator-stats --days 7
+memory cleanup-generated --dry-run
 ```
+
+`memory curator-stats` reads the local curator audit from SQLite history. `memory cleanup-generated --dry-run` only reports old generated aliases/links; it never deletes data.
 
 Manual capture:
 

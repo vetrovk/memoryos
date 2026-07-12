@@ -46,6 +46,12 @@ New learned memories may include frontmatter fields:
 
 Older notes without these fields remain valid.
 
+## Curator Audit
+
+Curator decisions are stored in `history`. Events include `curator_saved_permanent`, `curator_saved_draft`, `curator_skipped_duplicate`, `curator_skipped_near_duplicate`, `curator_skipped_low_quality`, `curator_skipped_no_useful_signal`, `curator_promoted_draft`, and `curator_dropped_draft`.
+
+Each event includes project, source, actor, outcome, quality score, reason, related note/path, and raw/useful/ignored file counts in `payload_json`.
+
 ## Identity
 
 `notes.id` is a UUID from Markdown frontmatter. The file path is not an identifier and may change.

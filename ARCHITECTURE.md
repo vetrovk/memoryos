@@ -115,6 +115,10 @@ Session -> Draft -> Memory Curator -> Permanent Memory
 
 The Memory Curator is deliberately simple and local. It calculates `quality_score`, sets `outcome`, skips duplicates and no-signal sessions, lowers score for temporary/runtime projects, and sends weak records to `_system/drafts/` instead of indexing them as permanent memory.
 
+Generated/dependency paths are filtered before the curator sees changed files. This keeps `node_modules`, build output, caches, logs, bytecode, and minified bundles out of permanent note content, aliases, links, diff summaries, and fingerprints.
+
+Curator audit events are append-only `history` rows. Near-duplicate detection uses a deterministic 24-hour comparison window, normalized goals, useful file Jaccard similarity, last commit, outcome, and a session fingerprint. No embeddings or external services are involved.
+
 Permanent memory should keep decisions, errors, useful conclusions, PRs, review outcomes, merge/close/reject outcomes, and reusable engineering lessons.
 
 ## GitHub PR Memory

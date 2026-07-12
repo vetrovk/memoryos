@@ -14,8 +14,9 @@ GOAL ?=
 ACTOR ?= agent
 LEARN_JSON ?= task-learning.json
 PR_URL ?=
+DAYS ?= 7
 
-.PHONY: init add import learn learn-json learn-session drafts index rebuild search digest doctor context stats graph github-pr agents
+.PHONY: init add import learn learn-json learn-session drafts curator-stats cleanup-generated index rebuild search digest doctor context stats graph github-pr agents
 
 init:
 	MEMORY_HOME="$(MEMORY_HOME)" $(MEMORY) init
@@ -37,6 +38,12 @@ learn-session:
 
 drafts:
 	MEMORY_HOME="$(MEMORY_HOME)" $(MEMORY) drafts
+
+curator-stats:
+	MEMORY_HOME="$(MEMORY_HOME)" $(MEMORY) curator-stats --days "$(DAYS)"
+
+cleanup-generated:
+	MEMORY_HOME="$(MEMORY_HOME)" $(MEMORY) cleanup-generated --dry-run
 
 github-pr:
 	MEMORY_HOME="$(MEMORY_HOME)" $(MEMORY) github-pr "$(PR_URL)" --source "$(SOURCE)" --actor "$(ACTOR)"

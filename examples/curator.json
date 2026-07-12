@@ -1,0 +1,13 @@
+{
+  "ignored_path_segments": [
+    ".git", "node_modules", "dist", "build", "out", ".next", ".nuxt",
+    ".cache", "cache", "tmp", "temp", ".tmp", ".venv", "venv",
+    "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+    "coverage", "htmlcov"
+  ],
+  "ignored_file_names": [".DS_Store", ".coverage"],
+  "ignored_suffixes": [".pyc", ".log"],
+  "ignored_name_suffixes": [".min.js", ".min.css", ".bundle.js", ".chunk.js"],
+  "near_duplicate_window_hours": 24,
+  "near_duplicate_similarity": 0.8
+}

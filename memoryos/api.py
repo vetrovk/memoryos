@@ -6,9 +6,10 @@ import sqlite3
 import subprocess
 import hashlib
 import shutil
+from datetime import datetime, timedelta
 from pathlib import Path
 
-from .config import OBJECT_TYPES, TYPE_FOLDERS, database_path, memory_home
+from .config import OBJECT_TYPES, TYPE_FOLDERS, database_path, load_curator_config, memory_home
 from .models import LearningSaveResult, NoteInput, SearchResult, SessionLearningPreview, TaskLearningInput
 from .search import SQLiteFTSSearchProvider
 from .storage import add_history, connect, ensure_dirs, init_db, log_error
@@ -90,7 +91,15 @@ class Memory:
                 source=learning.source,
                 related=split_tags([*learning.related, *[f"file:{changed_file}" for changed_file in learning.changed_files]]),
                 aliases=learning.changed_files,
-                extra_meta={"outcome": learning.outcome, "quality_score": learning.quality_score},
+                extra_meta={
+                    "outcome": learning.outcome,
+                    "quality_score": learning.quality_score,
+                    "raw_changed_files_count": learning.raw_changed_files_count,
+                    "useful_changed_files_count": learning.useful_changed_files_count,
+                    "ignored_changed_files_count": learning.ignored_changed_files_count,
+                    "ignored_changed_file_examples": learning.ignored_changed_file_examples,
+                    "curator_fingerprint": learning.curator_fingerprint,
+                },
             ),
             actor=learning.actor,
             reason="task learning",
@@ -131,6 +140,8 @@ class Memory:
         test_results: str = "",
         goal: str = "",
         draft: bool = True,
+        outcome: str = "",
+        findings: list[str] | None = None,
     ) -> LearningSaveResult | SessionLearningPreview:
         """Collect local session context, then persist it through learn()."""
         preview = self.collect_session_learning(
@@ -140,15 +151,22 @@ class Memory:
             cwd=cwd,
             test_results=test_results,
             goal=goal,
+            outcome=outcome,
+            findings=findings or [],
         )
         if dry_run:
             return preview
         if preview.disposition == "skip":
+            event = self._curator_event_for_skip(preview)
+            self._record_curator_event(event, preview.learning, preview.reason, preview.related_note_id, preview.related_note_path)
             return LearningSaveResult("skipped", f"skipped: {preview.reason}", quality_score=preview.learning.quality_score, reason=preview.reason)
         if preview.disposition == "draft" and draft:
             path = self.save_draft(preview.learning, reason=preview.reason)
+            self._record_curator_event("curator_saved_draft", preview.learning, preview.reason, path=str(path))
             return LearningSaveResult("draft", f"saved as draft: {path}", str(path), preview.learning.quality_score, preview.reason)
         path = self.learn(preview.learning)
+        note_id = self._note_id_for_path(path)
+        self._record_curator_event("curator_saved_permanent", preview.learning, preview.reason, note_id, str(path))
         return LearningSaveResult("permanent", f"saved to permanent memory: {path}", str(path), preview.learning.quality_score, preview.reason)
 
     def collect_session_learning(
@@ -159,30 +177,37 @@ class Memory:
         cwd: str | Path | None = None,
         test_results: str = "",
         goal: str = "",
+        outcome: str = "",
+        findings: list[str] | None = None,
     ) -> SessionLearningPreview:
         workdir = Path(cwd or Path.cwd()).expanduser().resolve()
         git_root = self._git_output(["rev-parse", "--show-toplevel"], workdir).strip()
         repo_dir = Path(git_root).resolve() if git_root else workdir
         remote = self._git_output(["remote", "get-url", "origin"], repo_dir).strip() if git_root else ""
-        status = self._git_output(["status", "--short"], repo_dir).strip() if git_root else ""
+        status = self._git_output(["status", "--short"], repo_dir).rstrip() if git_root else ""
         diff_stat = self._git_output(["diff", "--stat"], repo_dir).strip() if git_root else ""
-        changed_files = self._git_lines(["diff", "--name-only"], repo_dir) if git_root else []
-        changed_files.extend(self._status_files(status))
-        changed_files.extend(self._git_lines(["ls-files", "--others", "--exclude-standard"], repo_dir) if git_root else [])
-        changed_files = self._dedupe_changed_files(changed_files, repo_dir)
+        raw_changed_files = self._git_lines(["diff", "--name-only"], repo_dir) if git_root else []
+        raw_changed_files.extend(self._status_files(status))
+        raw_changed_files.extend(self._git_lines(["ls-files", "--others", "--exclude-standard"], repo_dir) if git_root else [])
+        raw_changed_files = self._dedupe_changed_files(raw_changed_files, repo_dir)
+        changed_files, ignored_changed_files = self._filter_generated_paths(raw_changed_files)
         last_commit = self._git_output(["log", "-1", "--pretty=format:%h %s (%ci)"], repo_dir).strip() if git_root else ""
         detected_test_results = test_results or self._find_test_results_from_logs(repo_dir)
         project_name = project or self._detect_project_name(repo_dir, remote)
-        goal_text = goal or self._infer_session_goal(project_name, changed_files, diff_stat, last_commit)
-        actions = self._infer_actions(status, diff_stat, changed_files)
+        useful_diff_stat = self._filtered_diff_stat(repo_dir, changed_files, diff_stat) if git_root else ""
+        goal_text = goal or self._infer_session_goal(project_name, changed_files, useful_diff_stat, last_commit)
+        actions = self._infer_actions(status, useful_diff_stat, changed_files)
+        if ignored_changed_files:
+            actions.append(f"Ignored generated/dependency paths: {len(ignored_changed_files)}.")
         decisions = self._infer_session_decisions(git_root, remote)
         commands = self._infer_recent_commands(repo_dir)
-        findings = self._infer_findings(status, diff_stat, last_commit, detected_test_results)
+        collected_findings = self._infer_findings(status, useful_diff_stat, last_commit, detected_test_results)
+        collected_findings.extend(findings or [])
         recommendations = self._infer_recommendations(changed_files, detected_test_results)
         if detected_test_results:
-            findings.append(f"Test results: {detected_test_results}")
+            collected_findings.append(f"Test results: {detected_test_results}")
         errors = self._infer_errors(status, detected_test_results)
-        outcome = self._infer_outcome(changed_files, errors, detected_test_results)
+        resolved_outcome = outcome or self._infer_outcome(changed_files, errors, detected_test_results)
         learning = TaskLearningInput(
             project=project_name,
             goal=goal_text,
@@ -191,18 +216,26 @@ class Memory:
             errors=errors,
             decisions=decisions,
             commands=commands,
-            findings=findings,
+            findings=collected_findings,
             recommendations=recommendations,
             tags=["from-session", "task-learning", project_name],
             source=source,
             actor=actor,
             related=[f"git:{remote}"] if remote else [],
-            outcome=outcome,
+            outcome=resolved_outcome,
+            raw_changed_files_count=len(raw_changed_files),
+            useful_changed_files_count=len(changed_files),
+            ignored_changed_files_count=len(ignored_changed_files),
+            ignored_changed_file_examples=ignored_changed_files[:8],
         )
         quality_score, quality_reason = self.score_learning(learning, last_commit=last_commit)
-        duplicate_reason = self._duplicate_reason(learning, last_commit)
+        learning.curator_fingerprint = self._session_fingerprint(learning, last_commit, useful_diff_stat)
+        duplicate_reason, related_note_id, related_note_path = self._duplicate_reason(learning, last_commit, useful_diff_stat)
         if duplicate_reason:
             quality_reason = duplicate_reason
+            disposition = "skip"
+        elif learning.outcome == "no_changes" and not self._has_no_changes_exception(learning):
+            quality_reason = "no useful signal for outcome=no_changes"
             disposition = "skip"
         elif quality_score <= SKIP_SCORE_THRESHOLD:
             disposition = "skip"
@@ -217,10 +250,16 @@ class Memory:
             git_root=str(repo_dir) if git_root else "",
             git_remote=remote,
             git_status=status,
-            git_diff_stat=diff_stat,
+            git_diff_stat=useful_diff_stat,
             last_commit=last_commit,
             disposition=disposition,
             reason=quality_reason,
+            raw_changed_files_count=len(raw_changed_files),
+            useful_changed_files_count=len(changed_files),
+            ignored_changed_files_count=len(ignored_changed_files),
+            ignored_changed_file_examples=ignored_changed_files[:8],
+            related_note_id=related_note_id,
+            related_note_path=related_note_path,
         )
 
     def score_learning(self, learning: TaskLearningInput, last_commit: str = "") -> tuple[int, str]:
@@ -243,7 +282,7 @@ class Memory:
         if useful_recs:
             score += 1
             reasons.append("useful recommendation +1")
-        if any("github.com" in item or "/pull/" in item for item in [*learning.related, *learning.findings, learning.goal]):
+        if any("/pull/" in item for item in [*learning.related, *learning.findings, learning.goal]):
             score += 3
             reasons.append("GitHub PR link found +3")
         if any("review" in item.lower() for item in [*learning.findings, *learning.actions]):
@@ -252,7 +291,16 @@ class Memory:
         if learning.outcome == "merged":
             score += 5
             reasons.append("merged PR +5")
-        no_signal = not learning.changed_files and not learning.errors and not meaningful_decisions and not any("test results:" in item.lower() for item in learning.findings)
+        if learning.outcome == "analysis_only" and self._has_no_changes_exception(learning):
+            score += 3
+            reasons.append("significant analysis-only result +3")
+        no_signal = (
+            not learning.changed_files
+            and not learning.errors
+            and not meaningful_decisions
+            and not any("test results:" in item.lower() for item in learning.findings)
+            and not self._has_no_changes_exception(learning)
+        )
         if no_signal:
             score -= 5
             reasons.append("no changes/tests/errors/decisions -5")
@@ -283,6 +331,11 @@ class Memory:
             "outcome": learning.outcome,
             "quality_score": learning.quality_score,
             "curator_reason": reason,
+            "raw_changed_files_count": learning.raw_changed_files_count,
+            "useful_changed_files_count": learning.useful_changed_files_count,
+            "ignored_changed_files_count": learning.ignored_changed_files_count,
+            "ignored_changed_file_examples": learning.ignored_changed_file_examples,
+            "curator_fingerprint": learning.curator_fingerprint,
         }
         body = self._render_learning_body(learning)
         path = draft_dir / f"{date_stamp()}-{slugify(learning.goal)}.md"
@@ -325,9 +378,10 @@ class Memory:
         target.write_text(build_markdown(meta, content), encoding="utf-8")
         con = self.connect()
         self._upsert_path(con, target)
-        add_history(con, str(meta.get("id") or ""), "promote_draft", actor="local", reason="draft promoted", payload={"draft": str(path), "target": str(target)})
         con.commit()
         con.close()
+        learning = self._learning_from_draft_meta(meta, content)
+        self._record_curator_event("curator_promoted_draft", learning, "draft promoted", str(meta.get("id") or ""), str(target))
         path.unlink()
         return target
 
@@ -335,8 +389,22 @@ class Memory:
         path = self._find_draft(draft_id)
         if not path:
             raise FileNotFoundError(f"Draft not found: {draft_id}")
+        meta, content = read_markdown(path)
+        learning = self._learning_from_draft_meta(meta, content)
+        self._record_curator_event("curator_dropped_draft", learning, "draft dropped", str(meta.get("id") or ""), str(path))
         path.unlink()
         return path
+
+    def _learning_from_draft_meta(self, meta: dict[str, object], content: str) -> TaskLearningInput:
+        return TaskLearningInput(
+            project=str(meta.get("project") or ""),
+            goal=str(meta.get("title") or "Draft learned"),
+            changed_files=self._extract_learning_bullets(content, "Changed Files"),
+            source=str(meta.get("source") or "local"),
+            actor="local",
+            outcome=str(meta.get("outcome") or "analysis_only"),
+            quality_score=int(meta.get("quality_score") or 0),
+        )
 
     def learn_from_github_pr(self, url: str, actor: str = "agent", source: str = "github") -> LearningSaveResult:
         if not shutil.which("gh"):
@@ -878,6 +946,9 @@ class Memory:
             f"- Disposition: {preview.disposition}",
             f"- Quality score: {learning.quality_score}",
             f"- Curator reason: {preview.reason or '-'}",
+            f"- Raw changed files: {preview.raw_changed_files_count}",
+            f"- Useful changed files: {preview.useful_changed_files_count}",
+            f"- Ignored generated/dependency files: {preview.ignored_changed_files_count}",
             "",
             self._render_learning_body(learning),
             "## Git Status",
@@ -893,6 +964,8 @@ class Memory:
             "```",
             "",
         ]
+        if preview.ignored_changed_file_examples:
+            lines.extend(["## Ignored Paths", "", *[f"- {path}" for path in preview.ignored_changed_file_examples], ""])
         return "\n".join(lines)
 
     def _git_output(self, args: list[str], cwd: Path) -> str:
@@ -909,7 +982,7 @@ class Memory:
             return ""
         if proc.returncode != 0:
             return ""
-        return proc.stdout.strip()
+        return proc.stdout.rstrip()
 
     def _git_lines(self, args: list[str], cwd: Path) -> list[str]:
         return [line.strip() for line in self._git_output(args, cwd).splitlines() if line.strip()]
@@ -956,6 +1029,35 @@ class Memory:
                 continue
             result.append(item)
         return result
+
+    def _filter_generated_paths(self, files: list[str], config: dict | None = None) -> tuple[list[str], list[str]]:
+        config = config or load_curator_config(self.home)
+        segments = {str(item).lower() for item in config["ignored_path_segments"]}
+        file_names = {str(item).lower() for item in config["ignored_file_names"]}
+        suffixes = tuple(str(item).lower() for item in config["ignored_suffixes"])
+        name_suffixes = tuple(str(item).lower() for item in config["ignored_name_suffixes"])
+        useful: list[str] = []
+        ignored: list[str] = []
+        for raw_path in files:
+            normalized = raw_path.replace("\\", "/").lstrip("./")
+            parts = [part.lower() for part in normalized.split("/") if part]
+            name = parts[-1] if parts else normalized.lower()
+            is_generated = (
+                any(part in segments for part in parts)
+                or name in file_names
+                or name.endswith(suffixes)
+                or name.endswith(name_suffixes)
+            )
+            (ignored if is_generated else useful).append(raw_path)
+        return useful, ignored
+
+    def _filtered_diff_stat(self, repo_dir: Path, useful_files: list[str], fallback: str) -> str:
+        if not useful_files:
+            return "No useful changed files after generated/dependency filtering."
+        if len(useful_files) > 200:
+            return f"{len(useful_files)} useful changed files after generated/dependency filtering."
+        stat = self._git_output(["diff", "--stat", "--", *useful_files], repo_dir)
+        return stat or fallback
 
     def _detect_project_name(self, repo_dir: Path, remote: str) -> str:
         pyproject = repo_dir / "pyproject.toml"
@@ -1082,6 +1184,14 @@ class Memory:
             recommendations.append("Pass explicit test results to learn_from_session when available.")
         return recommendations
 
+    def _has_no_changes_exception(self, learning: TaskLearningInput) -> bool:
+        meaningful_decisions = [item for item in learning.decisions if not item.startswith("Use local git metadata") and not item.startswith("Treat git working tree") and not item.startswith("Use git remote")]
+        significant_findings = [
+            item for item in learning.findings
+            if any(token in item.lower() for token in ["error", "failed", "blocked", "important", "significant", "analysis", "regression"])
+        ]
+        return bool(learning.errors or meaningful_decisions or significant_findings or learning.outcome == "analysis_only")
+
     def _infer_errors(self, status: str, test_results: str) -> list[str]:
         errors: list[str] = []
         lower = test_results.lower()
@@ -1101,17 +1211,25 @@ class Memory:
         payload = "\n".join(sorted(files))
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
-    def _duplicate_reason(self, learning: TaskLearningInput, last_commit: str = "") -> str:
+    def _session_fingerprint(self, learning: TaskLearningInput, last_commit: str, diff_stat: str) -> str:
+        top_level = sorted({path.replace("\\", "/").split("/", 1)[0] for path in learning.changed_files})
+        goal_key = re.sub(r"\d+", "N", learning.goal.lower())
+        payload = "\n".join([learning.project.lower(), goal_key, self._changed_files_hash(learning.changed_files), ",".join(top_level), last_commit, diff_stat, learning.outcome])
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:20]
+
+    def _duplicate_reason(self, learning: TaskLearningInput, last_commit: str = "", diff_stat: str = "") -> tuple[str, str, str]:
         changed_hash = self._changed_files_hash(learning.changed_files)
         goal_key = re.sub(r"\d+", "N", learning.goal.lower())
+        config = load_curator_config(self.home)
+        cutoff = (datetime.now() - timedelta(hours=int(config["near_duplicate_window_hours"]))).strftime("%Y-%m-%d %H:%M")
         con = self.connect()
         rows = con.execute(
             """
-            SELECT title, project, content, created FROM notes
-            WHERE lower(project) = lower(?) AND type = 'session'
+            SELECT id, path, title, project, content, created FROM notes
+            WHERE lower(project) = lower(?) AND type = 'session' AND created >= ?
             ORDER BY created DESC LIMIT 25
             """,
-            (learning.project,),
+            (learning.project, cutoff),
         ).fetchall()
         con.close()
         for row in rows:
@@ -1120,13 +1238,124 @@ class Memory:
             existing_hash = self._changed_files_hash(existing_files)
             existing_goal = " ".join(self._extract_learning_bullets(content, "Goal")) or row["title"]
             existing_goal_key = re.sub(r"\d+", "N", existing_goal.lower())
+            existing_paths = self._extract_learning_bullets(content, "Changed Files")
+            overlap = self._jaccard_similarity(set(learning.changed_files), set(existing_paths))
+            row_path = str(self.home / row["path"])
             if learning.changed_files and existing_hash == changed_hash:
-                return f"duplicate: same project and changed_files hash as {row['created']}"
-            if last_commit and last_commit in content:
-                return f"duplicate: same latest commit as {row['created']}"
+                return f"duplicate: same project and changed_files hash as {row['created']}", row["id"], row_path
+            if last_commit and last_commit in content and not learning.changed_files:
+                return f"duplicate: same latest commit as {row['created']}", row["id"], row_path
+            if learning.changed_files and overlap >= float(config["near_duplicate_similarity"]) and goal_key == existing_goal_key:
+                return f"near_duplicate: {overlap:.2f} useful file similarity with {row['created']}", row["id"], row_path
             if goal_key and goal_key == existing_goal_key and not learning.changed_files:
-                return f"duplicate: similar goal for project as {row['created']}"
-        return ""
+                return f"duplicate: similar goal for project as {row['created']}", row["id"], row_path
+        return "", "", ""
+
+    def _jaccard_similarity(self, left: set[str], right: set[str]) -> float:
+        if not left and not right:
+            return 1.0
+        if not left or not right:
+            return 0.0
+        return len(left & right) / len(left | right)
+
+    def _curator_event_for_skip(self, preview: SessionLearningPreview) -> str:
+        reason = preview.reason
+        if reason.startswith("near_duplicate"):
+            return "curator_skipped_near_duplicate"
+        if reason.startswith("duplicate"):
+            return "curator_skipped_duplicate"
+        if "no useful signal" in reason:
+            return "curator_skipped_no_useful_signal"
+        return "curator_skipped_low_quality"
+
+    def _record_curator_event(
+        self,
+        action: str,
+        learning: TaskLearningInput,
+        reason: str,
+        note_id: str = "",
+        path: str = "",
+    ) -> None:
+        con = self.connect()
+        add_history(
+            con,
+            note_id or None,
+            action,
+            actor=learning.actor,
+            reason=reason,
+            payload={
+                "project": learning.project,
+                "source": learning.source,
+                "actor": learning.actor,
+                "outcome": learning.outcome,
+                "quality_score": learning.quality_score,
+                "reason": reason,
+                "related_note_id": note_id,
+                "related_note_path": path,
+                "raw_changed_files_count": learning.raw_changed_files_count,
+                "useful_changed_files_count": learning.useful_changed_files_count,
+                "ignored_changed_files_count": learning.ignored_changed_files_count,
+                "curator_fingerprint": learning.curator_fingerprint,
+            },
+        )
+        con.commit()
+        con.close()
+
+    def curator_stats(self, days: int | None = None) -> tuple[dict[str, int | float], list[sqlite3.Row]]:
+        actions = [
+            "curator_saved_permanent",
+            "curator_saved_draft",
+            "curator_skipped_duplicate",
+            "curator_skipped_near_duplicate",
+            "curator_skipped_low_quality",
+            "curator_skipped_no_useful_signal",
+            "curator_promoted_draft",
+            "curator_dropped_draft",
+        ]
+        con = self.connect()
+        where = "action IN (" + ",".join("?" for _ in actions) + ")"
+        params: list[object] = list(actions)
+        if days is not None:
+            cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M")
+            where += " AND created >= ?"
+            params.append(cutoff)
+        rows = con.execute(f"SELECT * FROM history WHERE {where} ORDER BY created DESC", params).fetchall()
+        con.close()
+        counts = {action: sum(1 for row in rows if row["action"] == action) for action in actions}
+        saved = counts["curator_saved_permanent"] + counts["curator_saved_draft"]
+        skipped = counts["curator_skipped_duplicate"] + counts["curator_skipped_near_duplicate"] + counts["curator_skipped_low_quality"] + counts["curator_skipped_no_useful_signal"]
+        total = saved + skipped
+        return {
+            "permanent": counts["curator_saved_permanent"],
+            "drafts": counts["curator_saved_draft"],
+            "skipped_duplicate": counts["curator_skipped_duplicate"],
+            "skipped_near_duplicate": counts["curator_skipped_near_duplicate"],
+            "skipped_low_quality": counts["curator_skipped_low_quality"],
+            "skipped_no_useful_signal": counts["curator_skipped_no_useful_signal"],
+            "saved_percent": round((saved / total * 100), 1) if total else 0.0,
+            "skipped_percent": round((skipped / total * 100), 1) if total else 0.0,
+        }, rows[:10]
+
+    def cleanup_generated_dry_run(self) -> dict[str, int]:
+        con = self.connect()
+        aliases = [row["alias"] for row in con.execute("SELECT alias FROM aliases")]
+        links = [row["target"] for row in con.execute("SELECT target FROM links")]
+        note_ids = set()
+        config = load_curator_config(self.home)
+        for row in con.execute("SELECT note_id, alias FROM aliases"):
+            _, ignored = self._filter_generated_paths([row["alias"]], config)
+            if ignored:
+                note_ids.add(row["note_id"])
+        con.close()
+        generated_aliases = sum(1 for item in aliases if self._filter_generated_paths([item], config)[1])
+        generated_links = sum(1 for item in links if self._filter_generated_paths([item], config)[1])
+        return {"generated_aliases": generated_aliases, "generated_links": generated_links, "notes_affected": len(note_ids)}
+
+    def _note_id_for_path(self, path: Path) -> str:
+        con = self.connect()
+        row = con.execute("SELECT id FROM notes WHERE path = ?", (str(path.relative_to(self.home)),)).fetchone()
+        con.close()
+        return str(row["id"]) if row else ""
 
     def _extract_learning_bullets(self, content: str, section: str) -> list[str]:
         match = re.search(rf"## {re.escape(section)}\n\n(.*?)(?=\n## |\Z)", content, re.S)
