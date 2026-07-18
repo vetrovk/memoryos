@@ -35,6 +35,16 @@ def build_parser() -> argparse.ArgumentParser:
     github_pr.add_argument("url")
     github_pr.add_argument("--actor", default="agent")
     github_pr.add_argument("--source", default="github")
+    github_pr_deduplicate = add_home(sub.add_parser("github-pr-deduplicate"))
+    github_pr_deduplicate.add_argument("--dry-run", action="store_true", help="Show legacy GitHub PR duplicate groups.")
+    github_pr_deduplicate.add_argument("--apply", action="store_true", help="Archive duplicates after merging their captures into a canonical note.")
+
+    oss_candidate = add_home(sub.add_parser("oss-candidate"))
+    oss_candidate_sub = oss_candidate.add_subparsers(dest="oss_candidate_command", required=True)
+    oss_candidate_upsert = add_home(oss_candidate_sub.add_parser("upsert"))
+    oss_candidate_upsert.add_argument("--from-json", required=True, help="Structured OSS candidate JSON report.")
+    oss_candidate_upsert.add_argument("--actor", default="agent")
+    oss_candidate_upsert.add_argument("--source", default="oss-scout")
 
     drafts = add_home(sub.add_parser("drafts"))
     drafts_sub = drafts.add_subparsers(dest="draft_command")
@@ -211,6 +221,32 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "github-pr":
         result = memory.learn_from_github_pr(args.url, actor=args.actor, source=args.source)
+        print(result.message)
+        return 0 if result.disposition != "skipped" else 1
+    if args.command == "github-pr-deduplicate":
+        if args.dry_run and args.apply:
+            parser.error("Use either --dry-run or --apply, not both")
+        plans = memory.github_pr_deduplicate(apply=args.apply)
+        if not plans:
+            print("No GitHub PR duplicates found.")
+            return 0
+        print("Applied GitHub PR deduplication." if args.apply else "GitHub PR deduplication dry run.")
+        for plan in plans:
+            print(f"- {plan['identity_key']}")
+            print(f"  canonical: {plan['canonical']}")
+            for duplicate in plan["duplicates"]:
+                print(f"  duplicate: {duplicate}")
+            if plan["conflicts"]:
+                print(f"  conflicts: {', '.join(plan['conflicts'])}")
+        return 0
+    if args.command == "oss-candidate":
+        try:
+            report = json.loads(Path(args.from_json).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            parser.error(f"Could not read candidate JSON: {exc}")
+        if not isinstance(report, dict):
+            parser.error("Candidate JSON must contain an object")
+        result = memory.upsert_oss_candidate(report, actor=args.actor, source=args.source)
         print(result.message)
         return 0 if result.disposition != "skipped" else 1
     if args.command == "drafts":

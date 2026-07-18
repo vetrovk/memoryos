@@ -116,7 +116,7 @@ Never commit:
 memory add --title "Название" --type decision --project oracle --tags "архитектура,sqlite" --text "Решение и причина."
 ```
 
-Доступные типы: `project`, `person`, `company`, `guide`, `decision`, `error`, `command`, `session`, `prompt`, `idea`, `health_note`, `architecture`, `repository`, `github_pr_learning`, `project_note`.
+Доступные типы: `project`, `person`, `company`, `guide`, `decision`, `error`, `command`, `session`, `prompt`, `idea`, `health_note`, `architecture`, `repository`, `github_pr_learning`, `oss_candidate`, `project_note`.
 
 Каждая заметка получает YAML frontmatter:
 
@@ -280,6 +280,32 @@ memory github-pr https://github.com/owner/repo/pull/123
 MVP использует GitHub CLI `gh`, если он установлен. Если `gh` недоступен или не может прочитать PR, команда честно пишет причину и не создает запись.
 
 Новая заметка получает тип `github_pr_learning` и содержит ссылку на PR, репозиторий, номер, автора, reviewers, review/comments, outcome, связанные файлы, issues и выводы.
+
+Каждый PR получает стабильный ключ `github-pr:<owner>/<repo>#<number>`. Повторный захват обновляет один Markdown-файл, сохраняет UUID, оставляет предыдущий capture в тексте и пишет историю lifecycle в SQLite.
+
+```bash
+memory github-pr-deduplicate --dry-run
+memory github-pr-deduplicate --apply
+```
+
+`--apply` переносит только legacy-дубликаты в `90_archive/github_pr_duplicates/` после добавления их текста в каноническую заметку. Сначала всегда проверьте `--dry-run`.
+
+## OSS Scout candidate memory
+
+Кандидат OSS Scout хранится как одна структурированная decision-заметка с ключом `oss-candidate:<owner>/<repo>#<issue>`.
+
+```bash
+memory oss-candidate upsert --from-json candidate.json --actor codex --source oss-scout
+memory search "oss-candidate:owner/repo#42"
+```
+
+JSON обязан содержать `repository`, числовой `issue_number`, `investigation_state` (`NEW`, `INVESTIGATING`, `INVESTIGATE FURTHER`, `CLOSED`) и `verdict` (`TAKE`, `SKIP`, `NONE`). Флаги `existing_user_pr` или `existing_external_pr` всегда устанавливают `SKIP`. Повторный `INVESTIGATE FURTHER` без `material_change: true` пропускается, а не превращается в журнал активности.
+
+```python
+from memoryos import Memory
+
+Memory().upsert_oss_candidate(report, actor="codex", source="oss-scout")
+```
 
 ## Диагностика
 

@@ -44,6 +44,7 @@ TYPE_FOLDERS = {
     "architecture": "10_projects",
     "repository": "10_projects",
     "github_pr_learning": "70_decisions",
+    "oss_candidate": "70_decisions",
     "idea": "00_inbox",
 }
 
@@ -63,6 +64,7 @@ OBJECT_TYPES = sorted(
         "architecture",
         "repository",
         "github_pr_learning",
+        "oss_candidate",
         "project_note",
     }
 )

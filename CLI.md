@@ -126,3 +126,20 @@ memory github-pr https://github.com/owner/repo/pull/123
 ```
 
 Requires GitHub CLI `gh` for the MVP. If `gh` is missing or cannot read the PR, MemoryOS reports the error and does not save a partial memory.
+
+PR notes use `github-pr:<owner>/<repo>#<number>` as a stable identity. Repeated captures enrich one note and keep its UUID. Inspect old duplicate captures before archival migration:
+
+```bash
+memory github-pr-deduplicate --dry-run
+memory github-pr-deduplicate --apply
+```
+
+`--apply` moves legacy duplicates to `90_archive/github_pr_duplicates/` after merging their capture text into the canonical note.
+
+## `memory oss-candidate upsert`
+
+```bash
+memory oss-candidate upsert --from-json candidate.json
+```
+
+Required fields are `repository`, `issue_number`, `investigation_state`, and `verdict`. The stable key is `oss-candidate:<owner>/<repo>#<issue>`. Existing user or external PR flags force `SKIP`; an unchanged `INVESTIGATE FURTHER` report is skipped.

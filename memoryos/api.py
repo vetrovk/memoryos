@@ -8,6 +8,7 @@ import hashlib
 import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
+from urllib.parse import urlparse
 
 from .config import OBJECT_TYPES, TYPE_FOLDERS, database_path, load_curator_config, memory_home
 from .models import LearningSaveResult, NoteInput, SearchResult, SessionLearningPreview, TaskLearningInput
@@ -412,8 +413,15 @@ class Memory:
         data, error = self._gh_pr_view(url)
         if error:
             return LearningSaveResult("skipped", f"skipped: {error}", reason=error)
-        repo = self._repo_from_pr_url(url)
+        return self.upsert_github_pr(data, url=url, actor=actor, source=source)
+
+    def upsert_github_pr(self, data: dict[str, object], url: str, actor: str = "agent", source: str = "github") -> LearningSaveResult:
+        """Create or enrich the single canonical note for a GitHub PR."""
+        repo = self._normalize_github_repository(str(data.get("repository") or self._repo_from_pr_url(url)))
         number = str(data.get("number") or "")
+        identity_key = self.github_pr_identity_key(repo, number)
+        if not identity_key:
+            raise ValueError("GitHub PR requires repository and number")
         title = str(data.get("title") or f"PR {number}")
         state = str(data.get("state") or "").lower()
         merged_at = str(data.get("mergedAt") or "")
@@ -436,6 +444,7 @@ class Memory:
             body = (comment.get("body") or "").strip()
             if body:
                 comment_lines.append(f"{commenter}: {body[:300]}")
+        lifecycle = self._github_pr_lifecycle(outcome, reviews)
         quality_score = 3
         if reviews or comments:
             quality_score += 3
@@ -457,33 +466,296 @@ class Memory:
             author=author,
             reviewers=reviewers,
         )
-        stamp = now_text()
-        path = self.add(
-            NoteInput(
+        note = NoteInput(
                 title=f"PR: {title}",
                 type="github_pr_learning",
                 project=repo.split("/")[-1] if repo else "",
-                status="active",
-                tags=split_tags(["github", "pr", "review", outcome, repo]),
+                status=lifecycle,
+                tags=split_tags(["github", "pr", "review", outcome, lifecycle, repo]),
                 text=body,
                 source=source,
                 related=split_tags([url, *issue_links]),
-                aliases=split_tags([url, *files]),
+                aliases=split_tags([identity_key, url, *files]),
                 extra_meta={
+                    "identity_key": identity_key,
                     "repository": repo,
                     "pr_url": url,
                     "pr_number": number,
                     "outcome": outcome,
                     "merged_at": merged_at,
                     "quality_score": quality_score,
-                    "created": str(data.get("createdAt") or stamp),
-                    "updated": str(data.get("updatedAt") or stamp),
+                    "created": str(data.get("createdAt") or now_text()),
+                    "updated": now_text(),
                 },
-            ),
-            actor=actor,
-            reason="github pr learning",
+            )
+        existing = self._find_note_by_identity(identity_key, "github_pr_learning")
+        if not existing:
+            path = self.add(note, actor=actor, reason="github pr learning")
+            self._record_note_history(path, "github_pr_created", actor, "GitHub PR created", {"identity_key": identity_key, "status": lifecycle})
+            return LearningSaveResult("permanent", f"saved to permanent memory: {path}", str(path), quality_score, "github pr")
+        path, meta, previous = existing
+        old_status = str(meta.get("status") or "")
+        merged_body = body if body in previous else body + "\n## Previous Capture\n\n" + previous.rstrip() + "\n"
+        updated = self._update_note(path, meta, note, merged_body)
+        if old_status != lifecycle or body not in previous:
+            self._record_note_history(updated, "github_pr_updated", actor, "GitHub PR updated", {"identity_key": identity_key, "previous_status": old_status, "status": lifecycle})
+        return LearningSaveResult("permanent", f"updated permanent memory: {updated}", str(updated), quality_score, "github pr upsert")
+
+    @staticmethod
+    def _normalize_github_repository(repository: str) -> str:
+        value = repository.strip().lower().removesuffix(".git")
+        if "://" in value:
+            parts = [part for part in urlparse(value).path.split("/") if part]
+            value = "/".join(parts[:2])
+        elif value.startswith("git@github.com:"):
+            value = value.split(":", 1)[1]
+        return value.strip("/").removesuffix(".git")
+
+    @classmethod
+    def github_pr_identity_key(cls, repository: str, number: str | int) -> str:
+        repo = cls._normalize_github_repository(repository)
+        number_text = str(number).strip().lstrip("#")
+        return f"github-pr:{repo}#{number_text}" if repo and number_text.isdigit() else ""
+
+    @staticmethod
+    def _github_pr_lifecycle(outcome: str, reviews: list[object]) -> str:
+        states = {str((review or {}).get("state") or "").upper() for review in reviews if isinstance(review, dict)}
+        if outcome in {"merged", "closed"}:
+            return outcome
+        if "CHANGES_REQUESTED" in states:
+            return "changes_requested"
+        if "APPROVED" in states:
+            return "approved"
+        return "review" if states else "open"
+
+    def github_pr_deduplicate(self, apply: bool = False) -> list[dict[str, object]]:
+        """Report or archive legacy duplicate PR captures by stable identity."""
+        groups: dict[str, list[tuple[Path, dict[str, object], str]]] = {}
+        con = self.connect()
+        rows = con.execute(
+            "SELECT path FROM notes WHERE type = 'github_pr_learning' AND status != 'archived_duplicate'"
+        ).fetchall()
+        con.close()
+        for row in rows:
+            path = self.home / row["path"]
+            if not path.exists():
+                continue
+            meta, content = read_markdown(path)
+            identity_key = str(meta.get("identity_key") or self.github_pr_identity_key(
+                str(meta.get("repository") or self._repo_from_pr_url(str(meta.get("pr_url") or ""))),
+                str(meta.get("pr_number") or self._pr_number_from_url(str(meta.get("pr_url") or ""))),
+            ))
+            if identity_key:
+                groups.setdefault(identity_key, []).append((path, meta, content))
+
+        plans: list[dict[str, object]] = []
+        for identity_key, entries in sorted(groups.items()):
+            if len(entries) < 2:
+                continue
+            canonical = max(entries, key=lambda item: (len(item[2]), str(item[1].get("updated") or "")))
+            duplicates = [item for item in entries if item[0] != canonical[0]]
+            plan = {
+                "identity_key": identity_key,
+                "canonical": str(canonical[0]),
+                "duplicates": [str(item[0]) for item in duplicates],
+                "conflicts": self._github_pr_conflicts(entries),
+            }
+            plans.append(plan)
+            if apply:
+                self._archive_github_pr_duplicates(identity_key, canonical, duplicates)
+        return plans
+
+    def upsert_oss_candidate(
+        self,
+        report: dict[str, object],
+        actor: str = "agent",
+        source: str = "oss-scout",
+    ) -> LearningSaveResult:
+        """Create or enrich one structured memory for an OSS issue candidate."""
+        repository = self._normalize_github_repository(str(report.get("repository") or ""))
+        issue_number = str(report.get("issue_number") or "").strip().lstrip("#")
+        investigation_state = str(report.get("investigation_state") or "").upper()
+        verdict = str(report.get("verdict") or "").upper()
+        if not repository or not issue_number.isdigit() or investigation_state not in {"NEW", "INVESTIGATING", "INVESTIGATE FURTHER", "CLOSED"} or verdict not in {"TAKE", "SKIP", "NONE"}:
+            raise ValueError("oss candidate requires repository, numeric issue_number, valid investigation_state, and verdict")
+        identity_key = self.oss_candidate_identity_key(repository, issue_number)
+        existing_user_pr = bool(report.get("existing_user_pr"))
+        existing_external_pr = bool(report.get("existing_external_pr"))
+        verdict_reason = str(report.get("verdict_reason") or "")
+        if existing_user_pr:
+            verdict, verdict_reason = "SKIP", "existing user PR"
+        elif existing_external_pr:
+            verdict, verdict_reason = "SKIP", "existing external PR"
+        meaningful = bool(verdict_reason or report.get("notes") or report.get("tests_or_reproduction") or report.get("issue_title"))
+        if verdict == "NONE" and investigation_state == "NEW" and not meaningful:
+            return LearningSaveResult("skipped", "skipped: no useful candidate investigation", reason="no useful signal")
+
+        existing = self._find_note_by_identity(identity_key, "oss_candidate")
+        if existing and investigation_state == "INVESTIGATE FURTHER" and not bool(report.get("material_change")):
+            _, meta, _ = existing
+            if str(meta.get("status") or "").upper() == investigation_state and str(meta.get("verdict") or "").upper() == verdict:
+                return LearningSaveResult("skipped", "skipped: no material candidate change", reason="no material change")
+
+        issue_url = str(report.get("issue_url") or f"https://github.com/{repository}/issues/{issue_number}")
+        related = self._string_list([issue_url, *self._string_list(report.get("existing_pr_urls")), *self._string_list(report.get("existing_external_pr_urls"))])
+        body = self._render_oss_candidate_body(identity_key, repository, issue_number, investigation_state, verdict, verdict_reason, report, related)
+        note = NoteInput(
+            title=f"OSS candidate: {repository}#{issue_number}",
+            type="oss_candidate",
+            project=repository.split("/")[-1],
+            status=investigation_state,
+            tags=split_tags(["oss-candidate", verdict.lower(), investigation_state.lower(), repository]),
+            text=body,
+            source=str(report.get("source") or source),
+            related=related,
+            aliases=split_tags([identity_key, issue_url]),
+            extra_meta={
+                **report,
+                "identity_key": identity_key,
+                "repository": repository,
+                "issue_number": issue_number,
+                "investigation_state": investigation_state,
+                "verdict": verdict,
+                "verdict_reason": verdict_reason,
+                "existing_user_pr": existing_user_pr,
+                "existing_external_pr": existing_external_pr,
+                "updated": now_text(),
+            },
         )
-        return LearningSaveResult("permanent", f"saved to permanent memory: {path}", str(path), quality_score, "github pr")
+        if not existing:
+            path = self.add(note, actor=actor, reason="oss candidate upsert")
+            self._record_note_history(path, "oss_candidate_created", actor, "OSS candidate created", {"identity_key": identity_key, "verdict": verdict})
+            return LearningSaveResult("permanent", f"saved to permanent memory: {path}", str(path), 0, "oss candidate")
+        path, meta, previous = existing
+        updated = self._update_note(path, meta, note, body if body != previous else previous)
+        self._record_note_history(updated, "oss_candidate_updated", actor, "OSS candidate updated", {"identity_key": identity_key, "verdict": verdict})
+        return LearningSaveResult("permanent", f"updated permanent memory: {updated}", str(updated), 0, "oss candidate upsert")
+
+    @classmethod
+    def oss_candidate_identity_key(cls, repository: str, number: str | int) -> str:
+        repo = cls._normalize_github_repository(repository)
+        number_text = str(number).strip().lstrip("#")
+        return f"oss-candidate:{repo}#{number_text}" if repo and number_text.isdigit() else ""
+
+    def _find_note_by_identity(self, identity_key: str, note_type: str) -> tuple[Path, dict[str, object], str] | None:
+        con = self.connect()
+        rows = con.execute("SELECT path FROM notes WHERE type = ? AND aliases_json LIKE ?", (note_type, f"%{identity_key}%")).fetchall()
+        con.close()
+        for row in rows:
+            path = self.home / row["path"]
+            if not path.exists():
+                continue
+            meta, content = read_markdown(path)
+            if str(meta.get("identity_key") or "") == identity_key or identity_key in split_tags(meta.get("aliases")):
+                return path, meta, content
+        return None
+
+    def _update_note(self, path: Path, previous_meta: dict[str, object], note: NoteInput, content: str) -> Path:
+        meta = dict(previous_meta)
+        meta.update({
+            "title": note.title,
+            "type": note.type,
+            "project": note.project,
+            "status": note.status,
+            "source": note.source,
+            "parent": note.parent,
+            "updated": now_text(),
+        })
+        meta["tags"] = split_tags([*split_tags(previous_meta.get("tags")), *note.tags])
+        meta["related"] = split_tags([*split_tags(previous_meta.get("related")), *note.related])
+        meta["aliases"] = split_tags([*split_tags(previous_meta.get("aliases")), *note.aliases])
+        for key, value in note.extra_meta.items():
+            if value not in (None, "", [], {}):
+                meta[key] = value
+        meta["id"] = str(previous_meta.get("id") or uuid_text())
+        meta["created"] = str(previous_meta.get("created") or now_text())
+        path.write_text(build_markdown(meta, content), encoding="utf-8")
+        con = self.connect()
+        self._upsert_path(con, path)
+        con.commit()
+        con.close()
+        return path
+
+    def _record_note_history(self, path: Path, action: str, actor: str, reason: str, payload: dict[str, object]) -> None:
+        note_id = self._note_id_for_path(path)
+        if not note_id:
+            return
+        con = self.connect()
+        add_history(con, note_id, action, actor=actor, reason=reason, payload=payload)
+        con.commit()
+        con.close()
+
+    def _archive_github_pr_duplicates(
+        self,
+        identity_key: str,
+        canonical: tuple[Path, dict[str, object], str],
+        duplicates: list[tuple[Path, dict[str, object], str]],
+    ) -> None:
+        canonical_path, canonical_meta, canonical_body = canonical
+        captures = "".join(f"\n## Archived Duplicate Capture\n\n{content.rstrip()}\n" for _, _, content in duplicates)
+        canonical_note = NoteInput(
+            title=str(canonical_meta.get("title") or canonical_path.stem), type="github_pr_learning",
+            project=str(canonical_meta.get("project") or ""), status=str(canonical_meta.get("status") or "active"),
+            tags=split_tags(canonical_meta.get("tags")), text=canonical_body + captures,
+            source=str(canonical_meta.get("source") or "github"), related=split_tags(canonical_meta.get("related")),
+            aliases=split_tags([*split_tags(canonical_meta.get("aliases")), identity_key]), extra_meta={"identity_key": identity_key},
+        )
+        self._update_note(canonical_path, canonical_meta, canonical_note, canonical_note.text)
+        archive_dir = self.home / "90_archive" / "github_pr_duplicates"
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        canonical_id = self._note_id_for_path(canonical_path)
+        for path, meta, content in duplicates:
+            meta.update({"status": "archived_duplicate", "parent": canonical_id, "identity_key": identity_key, "updated": now_text()})
+            target = archive_dir / path.name
+            if target.exists():
+                target = archive_dir / f"{path.stem}-{str(meta.get('id') or uuid_text())[:8]}.md"
+            target.write_text(build_markdown(meta, content), encoding="utf-8")
+            path.unlink()
+            con = self.connect()
+            self._upsert_path(con, target)
+            con.commit()
+            con.close()
+            self._record_note_history(target, "github_pr_archived_duplicate", "memory", "legacy PR duplicate archived", {"identity_key": identity_key, "canonical": str(canonical_path)})
+        self._record_note_history(canonical_path, "github_pr_deduplicated", "memory", "legacy PR duplicates merged", {"identity_key": identity_key, "duplicates": len(duplicates)})
+
+    @staticmethod
+    def _github_pr_conflicts(entries: list[tuple[Path, dict[str, object], str]]) -> list[str]:
+        conflicts: list[str] = []
+        for field in ("title", "status", "outcome", "pr_url"):
+            values = sorted({str(meta.get(field) or "") for _, meta, _ in entries if meta.get(field)})
+            if len(values) > 1:
+                conflicts.append(f"{field}: {', '.join(values)}")
+        return conflicts
+
+    @staticmethod
+    def _pr_number_from_url(url: str) -> str:
+        match = re.search(r"/pull/(\d+)", url)
+        return match.group(1) if match else ""
+
+    @staticmethod
+    def _string_list(value: object) -> list[str]:
+        if isinstance(value, list):
+            return [str(item) for item in value if item]
+        return [str(value)] if value else []
+
+    def _render_oss_candidate_body(
+        self, identity_key: str, repository: str, issue_number: str, investigation_state: str,
+        verdict: str, verdict_reason: str, report: dict[str, object], related: list[str],
+    ) -> str:
+        fields = [
+            ("Identity key", identity_key), ("Repository", repository), ("Issue number", issue_number),
+            ("Issue title", str(report.get("issue_title") or "-")), ("Investigation state", investigation_state),
+            ("Verdict", verdict), ("Verdict reason", verdict_reason or "-"),
+            ("Existing user PR", str(bool(report.get("existing_user_pr"))).lower()),
+            ("Existing external PR", str(bool(report.get("existing_external_pr"))).lower()),
+        ]
+        lines = [f"# OSS Candidate: {repository}#{issue_number}", "", *[f"- {key}: {value}" for key, value in fields], ""]
+        for title, value in [("Notes", report.get("notes")), ("Tests or reproduction", report.get("tests_or_reproduction")), ("Related PRs", related)]:
+            lines.extend([f"## {title}", ""])
+            values = self._string_list(value)
+            lines.extend(f"- {item}" for item in values) if values else lines.append("No data.")
+            lines.append("")
+        return "\n".join(lines).rstrip() + "\n"
 
     def _gh_pr_view(self, url: str) -> tuple[dict[str, object], str]:
         fields = "number,title,url,state,author,createdAt,updatedAt,mergedAt,body,reviews,comments,files,closingIssuesReferences,reviewDecision,statusCheckRollup"

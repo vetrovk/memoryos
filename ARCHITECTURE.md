@@ -125,6 +125,10 @@ Permanent memory should keep decisions, errors, useful conclusions, PRs, review 
 
 `memory github-pr <url>` and `memory learn --from-github-pr <url>` use the local GitHub CLI `gh` when available. They save `github_pr_learning` notes with PR metadata, review comments, outcome, changed files, linked issues, and lessons. No external API is called directly by MemoryOS; the optional integration is delegated to the user's local `gh` setup.
 
+GitHub PR notes are keyed by `github-pr:<owner>/<repo>#<number>`, normalized to lowercase and without `.git`. A later capture updates the canonical Markdown note in place, keeps its UUID, and appends a SQLite history event. `memory github-pr-deduplicate --dry-run` reports old duplicate captures; `--apply` is an explicit archival migration.
+
+`oss_candidate` is a structured engineering-decision note for OSS Scout reports. Its key is `oss-candidate:<owner>/<repo>#<issue>`. The API and CLI upsert this identity, enforce required investigation fields, force `SKIP` when an existing PR is found, and skip unchanged `INVESTIGATE FURTHER` reports.
+
 ## Search
 
 The MVP uses `SQLiteFTSSearchProvider`. The `SearchProvider` interface is intentionally separate so future engines can be added without changing the user-facing API:
