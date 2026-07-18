@@ -1,5 +1,9 @@
 # MemoryOS
 
+[![CI](https://github.com/vetrovk/memoryos/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/vetrovk/memoryos/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Version](https://img.shields.io/github/v/tag/vetrovk/memoryos?label=version)](https://github.com/vetrovk/memoryos/tags)
+
 MemoryOS is a local Markdown and SQLite system for keeping engineering decisions, task outcomes, and investigation context searchable after a project session ends.
 
 It helps when an engineer or agent has already investigated a failure, reviewed a pull request, or rejected an OSS candidate, but the next person has to repeat that work because the useful conclusion was lost in a terminal, chat, or commit history.
@@ -43,7 +47,7 @@ git clone https://github.com/vetrovk/memoryos.git
 cd memoryos
 python3 -m venv .venv
 . .venv/bin/activate
-python -m pip install --no-use-pep517 -e .
+python -m pip install -e .
 memory --help
 ```
 
@@ -155,7 +159,7 @@ See [PRIVACY.md](PRIVACY.md) and [.gitignore](.gitignore).
 
 ## Current Status
 
-MemoryOS is an actively used public beta. The command-line workflow and Markdown format are usable now; the Python API and note schema may still change before a stable 1.0 release. Bug reports, focused issues, and small pull requests are welcome.
+MemoryOS v0.1.0 is an actively used public beta. The command-line workflow and Markdown format are usable now; the Python API and note schema may still change before a stable 1.0 release. Bug reports, focused issues, and small pull requests are welcome.
 
 ## Development
 
@@ -165,4 +169,12 @@ PYTHONPYCACHEPREFIX=/tmp/memoryos-pycache python3 -m py_compile memoryos/*.py
 python3 -m memoryos.cli doctor --home /tmp/memoryos-doctor
 ```
 
-The first beta release is planned as `v0.1.0`. It represents a working local engine rather than a long-term compatibility promise.
+## Troubleshooting
+
+For an old pip or an intentionally offline environment, use the included legacy setuptools fallback:
+
+```bash
+python -m pip install --no-use-pep517 -e .
+```
+
+v0.1.0 represents a working local engine rather than a long-term compatibility promise.

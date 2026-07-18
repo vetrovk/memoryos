@@ -12,7 +12,7 @@ Thanks for helping improve MemoryOS.
 ## Local Checks
 
 ```bash
-python -m pip install --no-use-pep517 -e .
+python -m pip install -e .
 python3 -m unittest discover -s tests -v
 PYTHONPYCACHEPREFIX=/tmp/memoryos-pycache python3 -m py_compile memoryos/*.py
 git diff --check

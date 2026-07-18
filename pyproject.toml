@@ -1,7 +1,7 @@
 [project]
 name = "memoryos-local"
 version = "0.1.0"
-description = "Local first Markdown and SQLite personal memory system."
+description = "Local-first engineering memory for coding agents and developers."
 requires-python = ">=3.9"
 dependencies = []
 
@@ -10,3 +10,7 @@ memory = "memoryos.cli:main"
 
 [tool.setuptools]
 packages = ["memoryos"]
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
