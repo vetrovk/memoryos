@@ -96,6 +96,7 @@ Core methods:
 - `memory.import_repo()`
 - `memory.export_context()`
 - `memory.learn()`
+- `memory.import_pending()`
 
 ## Automatic Task Learning
 
@@ -120,6 +121,12 @@ Generated/dependency paths are filtered before the curator sees changed files. T
 Curator audit events are append-only `history` rows. Near-duplicate detection uses a deterministic 24-hour comparison window, normalized goals, useful file Jaccard similarity, last commit, outcome, and a session fingerprint. No embeddings or external services are involved.
 
 Permanent memory should keep decisions, errors, useful conclusions, PRs, review outcomes, merge/close/reject outcomes, and reusable engineering lessons.
+
+## Codex Work Pending Import
+
+`memory.import_pending()` is a local batch adapter for Codex Work records in `.memoryos_pending/*.json`. Its configurable roots live in `_system/config/pending_import.json` and default to `~/Documents`. It maps `task` to a learning goal, `learning` to findings, `artifacts` to changed files, and preserves actor, source, status, outcome, and outcome details.
+
+The importer writes a normal Markdown session through `memory.learn()`, verifies that SQLite indexed it, records an `import_pending` history event, then moves the JSON to the sibling `archive/` directory. SHA-256 markers in `_system/cache/pending_imports.json` prevent duplicate notes; malformed files are logged and left untouched. The optional launchd plist is only a template and is never enabled by MemoryOS.
 
 ## GitHub PR Memory
 

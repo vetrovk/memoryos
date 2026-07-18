@@ -1,337 +1,168 @@
 # MemoryOS
 
-Локальная персональная система памяти для человека и AI-агентов: Markdown-объекты, UUID, SQLite-индекс, FTS5-поиск, связи, история, Python API и CLI.
+MemoryOS is a local Markdown and SQLite system for keeping engineering decisions, task outcomes, and investigation context searchable after a project session ends.
 
-По умолчанию данные создаются в `~/Memory`. Код скриптов лежит отдельно в этом репозитории.
+It helps when an engineer or agent has already investigated a failure, reviewed a pull request, or rejected an OSS candidate, but the next person has to repeat that work because the useful conclusion was lost in a terminal, chat, or commit history.
 
-## What Is MemoryOS?
+![MemoryOS flow](docs/images/memory-flow.svg)
 
-MemoryOS is a local-first memory engine for humans and AI agents. It stores durable notes as Markdown, indexes them with SQLite FTS5, and exposes both a Python API and CLI.
+## What It Does
 
-The repository contains only the engine. Your personal memory folder, SQLite database, logs, exports, drafts, cache, health notes, work notes, and secrets must stay outside Git.
+- Captures structured task learning through a Python API or `memory learn`.
+- Collects a local Git session with `memory learn --from-session`.
+- Curates session records into permanent notes, drafts, or skips when the signal is weak or duplicated.
+- Stores GitHub pull-request context and lifecycle updates in one durable note per PR.
+- Stores one structured OSS candidate decision per repository issue.
+- Imports local `.memoryos_pending/*.json` records from agent workflows.
+- Keeps Markdown as the source of truth and SQLite FTS5 as the local search index.
 
-## Структура памяти
+No cloud service, external API, or LLM is required for the core workflow. GitHub PR capture optionally uses the locally configured `gh` CLI.
 
-- `00_inbox/` - входящие заметки без сортировки
-- `10_projects/` - проекты
-- `20_people/` - люди, контакты, роли
-- `30_company/` - рабочие знания по компании
-- `40_health/` - личные медицинские заметки
-- `50_ai/` - AI, Codex, агенты, промпты
-- `60_guides/` - инструкции, команды, чек-листы
-- `70_decisions/` - принятые решения
-- `80_errors/` - ошибки и способы исправления
-- `90_archive/` - архив
-- `_system/database/` - SQLite
-- `_system/config/` - конфигурация
-- `_system/logs/` - логи
-- `_system/exports/` - контекстные экспорты
-- `_system/plugins/` - будущие плагины
-- `_system/scripts/` - служебные скрипты
-- `_system/cache/` - локальный кэш
-- `_system/drafts/` - черновики памяти, которые пока не попали в постоянную память
+## How It Works
 
-## Быстрый старт
-
-Без установки пакета:
-
-```bash
-python3 -m memoryos.cli init
-python3 -m memoryos.cli add --title "Oracle Bot заметка" --type project --project oracle --tags "oracle,bot" --text "Краткий контекст проекта."
-python3 -m memoryos.cli rebuild
-python3 -m memoryos.cli search "oracle bot"
-python3 -m memoryos.cli context oracle
-python3 -m memoryos.cli learn --project oracle --goal "Завершить настройку индекса" --action "Добавлен CLI learn" --command-used "python3 -m memoryos.cli doctor"
-python3 -m memoryos.cli drafts
-python3 -m memoryos.cli github-pr https://github.com/owner/repo/pull/123
-python3 -m memoryos.cli digest
-python3 -m memoryos.cli doctor
+```text
+Developer or agent
+        |
+      Session
+        |
+      Curator
+   /    |     \
+skip  draft  permanent Markdown note
+                    |
+              SQLite FTS5 search
 ```
 
-Editable install:
+Permanent notes are human-readable Markdown. SQLite indexes notes, tags, links, aliases, commands, and history so the same memory is both inspectable and searchable.
+
+## Install
+
+Requirements: Python 3.9 or newer, plus Git for session capture. GitHub PR capture additionally needs the GitHub CLI `gh`.
 
 ```bash
-python3 -m pip install -e .
+git clone https://github.com/vetrovk/memoryos.git
+cd memoryos
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install --no-use-pep517 -e .
+memory --help
+```
+
+The repository contains the engine only. Keep your actual memory folder outside the repository.
+
+## Quick Start
+
+This creates a disposable local memory, saves one engineering conclusion, and finds it again.
+
+```bash
+export MEMORY_HOME="$PWD/.memory-demo"
 memory init
-memory doctor
+
+memory learn \
+  --project demo \
+  --goal "Record the release checklist" \
+  --action "Created a local MemoryOS demo" \
+  --decision "Keep durable notes as Markdown" \
+  --finding "SQLite FTS5 returns the saved conclusion" \
+  --actor developer \
+  --source manual
+
+memory search "release checklist"
 ```
 
-После установки в editable-режиме будет доступна команда `memory`:
+The command creates Markdown under `$MEMORY_HOME` and updates its SQLite index immediately. Remove `.memory-demo/` when you no longer need the example.
+
+To preview automatic session capture without saving a note:
 
 ```bash
-python3 -m pip install -e .
-memory init
-memory search "oracle bot"
+memory learn --from-session --actor codex --source codex --dry-run
 ```
 
-Также работают Makefile-обертки:
+## Examples
+
+### Search a saved decision
 
 ```bash
-make init
-make add TITLE="Oracle Bot заметка" TYPE=project PROJECT=oracle TAGS="oracle,bot" TEXT="Краткий контекст проекта."
-make index
-make search QUERY="oracle bot"
-make context PROJECT=oracle
-make learn PROJECT=oracle GOAL="Завершить задачу" TAGS="codex,session"
-make learn-session PROJECT=oracle SOURCE=codex ACTOR=codex
-make drafts
-make github-pr PR_URL=https://github.com/owner/repo/pull/123
-make digest
-make doctor
+memory search "SQLFluff"
+memory search --project memoryos
 ```
 
-Если нужно тестировать без записи в `~/Memory`:
+![Local search result](docs/images/search-result.svg)
+
+### Keep one evolving GitHub PR memory
 
 ```bash
-make init MEMORY_HOME=/tmp/memory-test
-make search MEMORY_HOME=/tmp/memory-test QUERY="oracle"
+memory github-pr https://github.com/pytest-dev/pytest/pull/14702
+memory search "github-pr:pytest-dev/pytest#14702"
+memory github-pr-deduplicate --dry-run
 ```
 
-## Do Not Commit Personal Memory
+The `github-pr` command reads an accessible PR through `gh`. Repeated captures update the same note, identified as `github-pr:<owner>/<repo>#<number>`, and record its lifecycle in local history.
 
-Before publishing or pushing a fork, check:
+![GitHub PR memory](docs/images/github-pr-memory.svg)
+
+### Record an OSS investigation
 
 ```bash
-git status --short
-find . \( -name '*.sqlite3' -o -name '*.db' -o -name '*.log' -o -name '.env' \) -print
+memory oss-candidate upsert --from-json examples/oss-candidate.json
+memory search "oss-candidate:pytest-dev/pytest#14702"
 ```
 
-Never commit:
+`existing_user_pr` and `existing_external_pr` force a `SKIP` verdict. Repeating `INVESTIGATE FURTHER` without `material_change: true` is skipped instead of creating another activity log entry.
 
-- `~/Memory`
-- `Memory/`
-- `_system/`
-- SQLite databases
-- logs
-- drafts
-- exports
-- cache
-- `.env`
-- tokens or API keys
-- health, work, or personal notes
+![OSS candidate memory](docs/images/oss-candidate-memory.svg)
 
-## Добавление заметки
+### Import local agent records
 
 ```bash
-memory add --title "Название" --type decision --project oracle --tags "архитектура,sqlite" --text "Решение и причина."
+memory import-pending --dry-run
+memory import-pending --path "$HOME/Documents" --days 7
 ```
 
-Доступные типы: `project`, `person`, `company`, `guide`, `decision`, `error`, `command`, `session`, `prompt`, `idea`, `health_note`, `architecture`, `repository`, `github_pr_learning`, `oss_candidate`, `project_note`.
+Successful files are indexed and moved to a sibling `.memoryos_pending/archive/` folder. Failed JSON files stay in place and are logged locally.
 
-Каждая заметка получает YAML frontmatter:
+## Activity Log Vs. Memory
 
-```yaml
----
-id: "uuid"
-title: "..."
-type: "project"
-project: "oracle"
-status: "active"
-tags: ["oracle", "bot"]
-created: "YYYY-MM-DD HH:MM"
-updated: "YYYY-MM-DD HH:MM"
-source: "manual"
-parent: ""
-related: []
-aliases: []
----
-```
-
-## Поиск
-
-```bash
-memory search "oracle bot"
-memory search --project oracle
-memory search --type decision
-memory search --tags "sqlite,архитектура"
-```
-
-Поиск использует локальный SQLite FTS5 с `unicode61`, поэтому кириллица индексируется без внешних сервисов.
-
-## Индексация
-
-```bash
-memory rebuild
-```
-
-Команда перечитывает Markdown-файлы и пересобирает индекс. Ошибки отдельных файлов пишутся в `~/Memory/_system/logs/memory.log`.
-
-## Экспорт контекста для Codex
-
-```bash
-memory context oracle
-```
-
-Экспорт создается в `~/Memory/_system/exports/context_oracle_<date>.md` и включает описание проекта, архитектуру, решения, ошибки, команды, roadmap, репозитории и связи.
-
-## Импорт проекта
-
-```bash
-memory import ~/Projects/OmniBot --project omnibot
-```
-
-Импорт читает Markdown и распространенные проектные файлы: `README.md`, `CHANGELOG.md`, `TODO.md`, `AGENTS.md`, `Makefile`, `requirements.txt`, `pyproject.toml`, `Dockerfile`.
-
-## Автоматическое обучение памяти
-
-### Activity log vs real memory
-
-MemoryOS больше не должна сохранять каждую активность как постоянную память. Не каждая сессия достойна долгого хранения. Постоянная память должна хранить решения, ошибки, выводы, PR, review, merge и полезный инженерный опыт.
-
-`memory learn --from-session` теперь проходит через простой Memory Curator:
-
-- считает `quality_score`;
-- определяет `outcome`;
-- пропускает пустые сессии;
-- снижает score для временных проектов вроде `tmp` и runtime/plugin папок;
-- ищет дубликаты по проекту, changed files hash, commit и похожей цели;
-- сохраняет сильные записи в постоянную память;
-- слабые записи сохраняет в `_system/drafts/` или пропускает с понятным сообщением.
-
-### Generated Files Are Activity Noise, Not Engineering Memory
-
-Перед scoring curator исключает generated/dependency пути: `node_modules/`, `dist/`, `build/`, `out/`, `.next/`, `.nuxt/`, cache/temporary folders, virtualenvs, bytecode, логи, `.DS_Store` и common minified bundles. Они не попадают в заметку, aliases, links, diff summary и fingerprint.
-
-Настройки можно переопределить локально в `~/Memory/_system/config/curator.json`; пример лежит в [examples/curator.json](examples/curator.json). `.github/` не исключается по умолчанию, поскольку CI/workflow изменения могут быть важной инженерной работой.
-
-Самый короткий путь для агента после завершения задачи:
-
-```bash
-python3 -m memoryos.cli learn --from-session --actor codex --source codex
-```
-
-Предварительный просмотр без сохранения:
-
-```bash
-python3 -m memoryos.cli learn --from-session --actor codex --source codex --dry-run
-```
-
-Можно переопределить проект:
-
-```bash
-python3 -m memoryos.cli learn --from-session --project memoryos --actor codex --source codex
-```
-
-`--from-session` автоматически собирает текущий проект, `git status`, `git diff --stat`, измененные файлы, последний commit, безопасные git-команды, краткие выводы и рекомендации. Внешние API и LLM не используются.
-
-Черновики:
+Not every command, changed file, or empty session deserves permanent memory. The Curator scores session signals, filters generated files, detects duplicates and near-duplicates, and either saves a permanent note, creates a draft, or explains why it skipped the session.
 
 ```bash
 memory drafts
 memory drafts review
-memory drafts promote <id>
-memory drafts drop <id>
 memory curator-stats --days 7
 memory cleanup-generated --dry-run
 ```
 
-Curator audit хранится в SQLite `history`: saved, draft, skipped, promote и drop решения записываются вместе с причиной, score и raw/useful/ignored file counts.
+## Why This Shape
 
-После успешного завершения задачи агент может сохранить структурированную запись:
+MemoryOS stores decisions and outcomes rather than a raw conversation history. Markdown remains portable and reviewable in Git or an editor, while SQLite FTS5 makes those notes practical to retrieve during the next task.
 
-```bash
-python3 -m memoryos.cli learn \
-  --project oracle \
-  --goal "Исправить поиск по проекту" \
-  --action "Добавлен SearchProvider" \
-  --file "memoryos/search.py" \
-  --decision "Оставить SQLite FTS5 как MVP-поиск" \
-  --command-used "python3 -m memoryos.cli doctor" \
-  --finding "Индекс обновляется сразу после сохранения" \
-  --recommendation "Позже добавить vector provider"
-```
+## Privacy
 
-Для агентов удобнее JSON:
+- Core data stays on the local filesystem selected by `MEMORY_HOME`, or `~/Memory` by default.
+- Do not commit a real memory folder, SQLite database, logs, exports, drafts, pending records, or `.env` files.
+- The optional `memory github-pr` command calls your local `gh` CLI. It does not send local MemoryOS notes to GitHub.
 
-```bash
-python3 -m memoryos.cli learn --from-json task-learning.json
-```
+See [PRIVACY.md](PRIVACY.md) and [.gitignore](.gitignore).
 
-Минимальная схема JSON:
+## Documentation
 
-```json
-{
-  "project": "oracle",
-  "goal": "Исправить поиск по проекту",
-  "actions": ["Добавлен SearchProvider"],
-  "changed_files": ["memoryos/search.py"],
-  "errors": [],
-  "decisions": ["Оставить SQLite FTS5 как MVP-поиск"],
-  "commands": ["python3 -m memoryos.cli doctor"],
-  "findings": ["Индекс обновляется сразу после сохранения"],
-  "recommendations": ["Позже добавить vector provider"],
-  "tags": ["codex", "task-learning"],
-  "source": "codex",
-  "actor": "codex"
-}
-```
+- [CLI reference](CLI.md)
+- [Architecture](ARCHITECTURE.md)
+- [Database and search model](DATABASE.md)
+- [Plugin API](PLUGIN_API.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
+- [Changelog](CHANGELOG.md)
 
-`memory learn` сохраняет запись как объект `session`, добавляет UUID frontmatter, индексирует ее в SQLite, извлекает команды в `commands`, связывает измененные файлы через `links` и aliases.
+## Current Status
 
-## GitHub PR memory
+MemoryOS is an actively used public beta. The command-line workflow and Markdown format are usable now; the Python API and note schema may still change before a stable 1.0 release. Bug reports, focused issues, and small pull requests are welcome.
 
-PR можно сохранить как инженерную память:
+## Development
 
 ```bash
-memory learn --from-github-pr https://github.com/owner/repo/pull/123
-memory github-pr https://github.com/owner/repo/pull/123
+python3 -m unittest discover -s tests -v
+PYTHONPYCACHEPREFIX=/tmp/memoryos-pycache python3 -m py_compile memoryos/*.py
+python3 -m memoryos.cli doctor --home /tmp/memoryos-doctor
 ```
 
-MVP использует GitHub CLI `gh`, если он установлен. Если `gh` недоступен или не может прочитать PR, команда честно пишет причину и не создает запись.
-
-Новая заметка получает тип `github_pr_learning` и содержит ссылку на PR, репозиторий, номер, автора, reviewers, review/comments, outcome, связанные файлы, issues и выводы.
-
-Каждый PR получает стабильный ключ `github-pr:<owner>/<repo>#<number>`. Повторный захват обновляет один Markdown-файл, сохраняет UUID, оставляет предыдущий capture в тексте и пишет историю lifecycle в SQLite.
-
-```bash
-memory github-pr-deduplicate --dry-run
-memory github-pr-deduplicate --apply
-```
-
-`--apply` переносит только legacy-дубликаты в `90_archive/github_pr_duplicates/` после добавления их текста в каноническую заметку. Сначала всегда проверьте `--dry-run`.
-
-## OSS Scout candidate memory
-
-Кандидат OSS Scout хранится как одна структурированная decision-заметка с ключом `oss-candidate:<owner>/<repo>#<issue>`.
-
-```bash
-memory oss-candidate upsert --from-json candidate.json --actor codex --source oss-scout
-memory search "oss-candidate:owner/repo#42"
-```
-
-JSON обязан содержать `repository`, числовой `issue_number`, `investigation_state` (`NEW`, `INVESTIGATING`, `INVESTIGATE FURTHER`, `CLOSED`) и `verdict` (`TAKE`, `SKIP`, `NONE`). Флаги `existing_user_pr` или `existing_external_pr` всегда устанавливают `SKIP`. Повторный `INVESTIGATE FURTHER` без `material_change: true` пропускается, а не превращается в журнал активности.
-
-```python
-from memoryos import Memory
-
-Memory().upsert_oss_candidate(report, actor="codex", source="oss-scout")
-```
-
-## Диагностика
-
-```bash
-make doctor
-```
-
-Проверяет папки, SQLite, FTS5, UUID в Markdown, битые Markdown-файлы и дубликаты заголовков.
-
-## Ежедневная автоматическая индексация
-
-Файл launchd подготовлен в `launchd/com.local.memory.index.plist`. Перед включением замените путь к репозиторию, если он отличается.
-
-```bash
-mkdir -p ~/Library/LaunchAgents
-cp launchd/com.local.memory.index.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/com.local.memory.index.plist
-```
-
-Автозапуск не включается автоматически. Сначала проверьте `make index` и `make doctor`.
-
-## Будущие расширения
-
-- векторный поиск рядом с FTS5;
-- импорт из GitHub и логов проектов;
-- Obsidian-совместимость;
-- локальный веб-интерфейс;
-- синхронизация на homelab;
-- дайджесты по отдельным проектам.
+The first beta release is planned as `v0.1.0`. It represents a working local engine rather than a long-term compatibility promise.

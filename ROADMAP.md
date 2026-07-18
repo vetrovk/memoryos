@@ -14,6 +14,7 @@
 - Memory Curator with quality score, outcome, drafts, duplicate/noise filtering.
 - Generated/dependency filtering, deterministic near-duplicate detection, and curator audit stats.
 - GitHub PR memory through optional `gh` CLI.
+- Local Codex Work pending import with archive, hash deduplication, and an inactive daily launchd template.
 
 ## Next
 

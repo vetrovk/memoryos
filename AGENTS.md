@@ -17,6 +17,7 @@ python3 -m memoryos.cli doctor
 python3 -m memoryos.cli search "query"
 python3 -m memoryos.cli learn --project <project> --goal "<goal>"
 python3 -m memoryos.cli learn --from-session --actor codex --source codex
+python3 -m memoryos.cli import-pending --dry-run
 ```
 
 ## Rules
@@ -26,6 +27,7 @@ python3 -m memoryos.cli learn --from-session --actor codex --source codex
 - Keep Markdown files human readable.
 - Preserve frontmatter UUIDs.
 - Prefer simple standard-library Python unless a dependency is clearly justified.
+- Do not enable the pending-import launchd plist without explicit confirmation.
 
 ## MemoryOS workflow
 

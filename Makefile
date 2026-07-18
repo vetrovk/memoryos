@@ -16,7 +16,7 @@ LEARN_JSON ?= task-learning.json
 PR_URL ?=
 DAYS ?= 7
 
-.PHONY: init add import learn learn-json learn-session drafts curator-stats cleanup-generated index rebuild search digest doctor context stats graph github-pr agents
+.PHONY: init add import import-pending learn learn-json learn-session drafts curator-stats cleanup-generated index rebuild search digest doctor context stats graph github-pr agents
 
 init:
 	MEMORY_HOME="$(MEMORY_HOME)" $(MEMORY) init
@@ -26,6 +26,9 @@ add:
 
 import:
 	MEMORY_HOME="$(MEMORY_HOME)" $(MEMORY) import "$(IMPORT_PATH)" --project "$(PROJECT)"
+
+import-pending:
+	MEMORY_HOME="$(MEMORY_HOME)" $(MEMORY) import-pending --days "$(DAYS)"
 
 learn:
 	MEMORY_HOME="$(MEMORY_HOME)" $(MEMORY) learn --project "$(PROJECT)" --goal "$(GOAL)" --tags "$(TAGS)" --source "$(SOURCE)" --actor "$(ACTOR)"

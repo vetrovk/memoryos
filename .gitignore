@@ -6,6 +6,8 @@ __pycache__/
 .env
 .env.*
 !.env.example
+.memory-demo/
+.memoryos_pending/
 
 # Do not commit local memory data if MEMORY_HOME points into this repository.
 Memory/

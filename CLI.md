@@ -30,9 +30,12 @@ or:
 memory init
 memory add --title "Oracle Bot заметка" --type project --project oracle --tags "oracle,bot" --text "Описание."
 memory import ~/Projects/OmniBot --project omnibot
+memory import-pending --dry-run
 memory learn --from-session --actor codex --source codex
 memory drafts
 memory github-pr https://github.com/owner/repo/pull/123
+memory github-pr-deduplicate --dry-run
+memory oss-candidate upsert --from-json candidate.json --actor codex --source oss-scout
 memory learn --project oracle --goal "Fix search" --action "Updated SearchProvider" --file memoryos/search.py --command-used "memory doctor"
 memory search "oracle bot"
 memory search --project oracle --type decision
@@ -51,6 +54,7 @@ memory agents oracle --target AGENTS.md
 make init
 make add TITLE="Заметка" TYPE=decision PROJECT=oracle TAGS="sqlite,архитектура" TEXT="Решение."
 make import IMPORT_PATH=~/Projects/OmniBot PROJECT=omnibot
+make import-pending
 make learn-session PROJECT=oracle SOURCE=codex ACTOR=codex
 make drafts
 make github-pr PR_URL=https://github.com/owner/repo/pull/123
@@ -117,6 +121,28 @@ memory learn --from-json task-learning.json
 ```
 
 `--from-json -` reads JSON from stdin.
+
+## `memory import-pending`
+
+Imports local Codex Work files matching `.memoryos_pending/*.json` recursively. Default roots come from `~/Memory/_system/config/pending_import.json` and default to `~/Documents`.
+
+```bash
+memory import-pending
+memory import-pending --dry-run
+memory import-pending --days 7
+memory import-pending --path "/path/to/projects"
+```
+
+`--dry-run` does not save notes or move files. A successful import verifies the SQLite note, then moves the source to `.memoryos_pending/archive/`. Failed files remain in place and are recorded in `memory.log`; one bad JSON file does not stop the batch. The local SHA-256 state file prevents re-importing a copied or retried record.
+
+For a daily macOS job, copy and fill the placeholders in `launchd/com.memoryos.import-pending.plist.example`; do not load it until you explicitly want scheduling enabled.
+
+```bash
+cp launchd/com.memoryos.import-pending.plist.example ~/Library/LaunchAgents/com.memoryos.import-pending.plist
+# Replace __MEMORYOS_PYTHON__, __MEMORYOS_REPOSITORY__, and __MEMORYOS_HOME__.
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.memoryos.import-pending.plist
+launchctl bootout gui/$(id -u)/com.memoryos.import-pending
+```
 
 ## GitHub PR Memory
 

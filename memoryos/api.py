@@ -10,7 +10,15 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
 
-from .config import OBJECT_TYPES, TYPE_FOLDERS, database_path, load_curator_config, memory_home
+from .config import (
+    OBJECT_TYPES,
+    TYPE_FOLDERS,
+    database_path,
+    load_curator_config,
+    load_pending_import_config,
+    memory_home,
+    pending_import_state_path,
+)
 from .models import LearningSaveResult, NoteInput, SearchResult, SessionLearningPreview, TaskLearningInput
 from .search import SQLiteFTSSearchProvider
 from .storage import add_history, connect, ensure_dirs, init_db, log_error
@@ -130,6 +138,193 @@ class Memory:
         con.commit()
         con.close()
         return path
+
+    def import_pending(
+        self,
+        paths: list[str | Path] | None = None,
+        days: int | None = None,
+        dry_run: bool = False,
+    ) -> dict[str, object]:
+        """Import Codex Work pending JSON records from configured project roots."""
+        if days is not None and days < 0:
+            raise ValueError("days must be zero or greater")
+        configured_paths = paths or load_pending_import_config(self.home)["paths"]
+        roots = self._pending_roots(configured_paths)
+        markers = self._load_pending_import_markers()
+        report: dict[str, object] = {
+            "roots": [str(root) for root in roots],
+            "found": 0,
+            "imported": 0,
+            "archived": 0,
+            "skipped": 0,
+            "errors": 0,
+            "dry_run": dry_run,
+            "items": [],
+        }
+        cutoff = datetime.now().timestamp() - (days * 86400) if days is not None else None
+        for path in self._pending_files(roots):
+            if cutoff is not None and path.stat().st_mtime < cutoff:
+                continue
+            report["found"] = int(report["found"]) + 1
+            item: dict[str, str] = {"path": str(path)}
+            cast_items = report["items"]
+            assert isinstance(cast_items, list)
+            cast_items.append(item)
+            try:
+                digest = hashlib.sha256(path.read_bytes()).hexdigest()
+                marker = markers.get(digest)
+                if marker is not None and not isinstance(marker, dict):
+                    raise ValueError("invalid pending import marker")
+                if marker:
+                    if not dry_run and marker.get("state") == "imported":
+                        archived_path = self._archive_pending_file(path, digest)
+                        marker["state"] = "archived"
+                        marker["archived_path"] = str(archived_path)
+                        self._save_pending_import_markers(markers)
+                        report["archived"] = int(report["archived"]) + 1
+                        item["status"] = "archived_after_retry"
+                    else:
+                        report["skipped"] = int(report["skipped"]) + 1
+                        item["status"] = "duplicate" if not dry_run else "would_skip_duplicate"
+                    continue
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                learning = self._learning_from_pending_payload(payload, path, roots)
+                if dry_run:
+                    item["status"] = "would_import"
+                    item["project"] = learning.project
+                    continue
+                note_path = self.learn(learning)
+                note_id = self._note_id_for_path(note_path)
+                if not note_id:
+                    raise RuntimeError("saved note was not found in the SQLite index")
+                con = self.connect()
+                add_history(
+                    con,
+                    note_id,
+                    "import_pending",
+                    actor=learning.actor,
+                    reason="Codex Work pending import",
+                    payload={"sha256": digest, "source_path": str(path), "note_path": str(note_path)},
+                )
+                con.commit()
+                con.close()
+                markers[digest] = {"state": "imported", "source_path": str(path), "note_path": str(note_path)}
+                self._save_pending_import_markers(markers)
+                archived_path = self._archive_pending_file(path, digest)
+                markers[digest]["state"] = "archived"
+                markers[digest]["archived_path"] = str(archived_path)
+                self._save_pending_import_markers(markers)
+                report["imported"] = int(report["imported"]) + 1
+                report["archived"] = int(report["archived"]) + 1
+                item["status"] = "imported"
+                item["note"] = str(note_path)
+            except Exception as exc:
+                report["errors"] = int(report["errors"]) + 1
+                item["status"] = "error"
+                item["error"] = str(exc)
+                log_error(self.home, f"pending import failed for {path}: {exc}")
+        return report
+
+    def _pending_roots(self, paths: list[str | Path]) -> list[Path]:
+        roots: list[Path] = []
+        for value in paths:
+            root = Path(value).expanduser().resolve()
+            if root not in roots:
+                roots.append(root)
+        return roots
+
+    def _pending_files(self, roots: list[Path]) -> list[Path]:
+        files: list[Path] = []
+        for root in roots:
+            if root.is_dir():
+                files.extend(path for path in root.rglob(".memoryos_pending/*.json") if path.is_file())
+        return sorted(set(files))
+
+    def _load_pending_import_markers(self) -> dict[str, dict[str, str]]:
+        path = pending_import_state_path(self.home)
+        if not path.exists():
+            return {}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _save_pending_import_markers(self, markers: dict[str, dict[str, str]]) -> None:
+        path = pending_import_state_path(self.home)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(markers, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    def _archive_pending_file(self, path: Path, digest: str) -> Path:
+        archive_dir = path.parent / "archive"
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        destination = archive_dir / path.name
+        if destination.exists():
+            destination = archive_dir / f"{path.stem}-{digest[:10]}{path.suffix}"
+        shutil.move(str(path), str(destination))
+        return destination
+
+    def _learning_from_pending_payload(self, payload: object, path: Path, roots: list[Path]) -> TaskLearningInput:
+        if not isinstance(payload, dict):
+            raise ValueError("pending JSON must contain an object")
+        if payload.get("schema_version") != 1:
+            raise ValueError("unsupported pending schema_version")
+        task = str(payload.get("task") or "").strip()
+        if not task:
+            raise ValueError("pending JSON requires a non-empty task")
+        artifacts = self._pending_strings(payload.get("artifacts"), keys=("path", "file", "name", "uri"))
+        findings = self._pending_strings(payload.get("learning"))
+        outcome_data = payload.get("outcome")
+        outcome = str(payload.get("status") or "completed")
+        if isinstance(outcome_data, dict):
+            outcome = str(outcome_data.get("outcome") or outcome_data.get("status") or outcome)
+            if outcome_data:
+                findings.append(f"Outcome details: {json.dumps(outcome_data, ensure_ascii=False, sort_keys=True)}")
+        elif outcome_data:
+            outcome = str(outcome_data)
+        status = str(payload.get("status") or outcome or "active")
+        project = str(payload.get("project") or "").strip()
+        if not project:
+            project = self._pending_project_from_path(path, roots)
+        if not project:
+            project = str(payload.get("skill") or "codex-work").strip()
+        if payload.get("memoryos_error"):
+            findings.append(f"Codex Work memory error: {payload['memoryos_error']}")
+        learning = TaskLearningInput(
+            project=project,
+            goal=task,
+            actions=["Imported from Codex Work pending record."],
+            changed_files=artifacts,
+            findings=findings,
+            tags=["pending-import", "codex-work", project],
+            source=str(payload.get("source") or "codex"),
+            actor=str(payload.get("actor") or "codex"),
+            status=status,
+            outcome=outcome,
+            raw_changed_files_count=len(artifacts),
+            useful_changed_files_count=len(artifacts),
+        )
+        learning.quality_score, _ = self.score_learning(learning)
+        return learning
+
+    @staticmethod
+    def _pending_strings(value: object, keys: tuple[str, ...] = ()) -> list[str]:
+        values = value if isinstance(value, list) else ([] if value is None else [value])
+        result: list[str] = []
+        for item in values:
+            if isinstance(item, dict):
+                item = next((item[key] for key in keys if item.get(key)), "")
+            text = str(item).strip()
+            if text and text not in result:
+                result.append(text)
+        return result
+
+    @staticmethod
+    def _pending_project_from_path(path: Path, roots: list[Path]) -> str:
+        project_dir = path.parent.parent
+        if project_dir in roots:
+            return ""
+        return project_dir.name
 
     def learn_from_session(
         self,

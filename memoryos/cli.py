@@ -82,6 +82,11 @@ def build_parser() -> argparse.ArgumentParser:
     importer.add_argument("path")
     importer.add_argument("--project", default="")
 
+    pending_importer = add_home(sub.add_parser("import-pending"))
+    pending_importer.add_argument("--path", action="append", default=[], help="Project root to search; repeatable.")
+    pending_importer.add_argument("--days", type=int, default=None, help="Only process JSON files modified in the last N days.")
+    pending_importer.add_argument("--dry-run", action="store_true", help="Report pending files without saving or archiving them.")
+
     learn = add_home(sub.add_parser("learn"))
     learn.add_argument("--from-json", default="", help="Read learning payload from JSON file, or '-' for stdin.")
     learn.add_argument("--from-session", action="store_true", help="Collect project/session data from the current working tree.")
@@ -162,6 +167,19 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "import":
         print(f"Imported files: {memory.import_repo(Path(args.path), project=args.project)}")
         return 0
+    if args.command == "import-pending":
+        try:
+            report = memory.import_pending(paths=args.path or None, days=args.days, dry_run=args.dry_run)
+        except ValueError as exc:
+            parser.error(str(exc))
+        for key in ("roots", "found", "imported", "archived", "skipped", "errors", "dry_run"):
+            value = report[key]
+            print(f"{key}: {', '.join(value) if isinstance(value, list) else value}")
+        for item in report["items"]:
+            print(f"- {item['status']}: {item['path']}")
+            if item.get("error"):
+                print(f"  error: {item['error']}")
+        return 0 if not report["errors"] else 1
     if args.command == "learn":
         if args.from_github_pr:
             result = memory.learn_from_github_pr(args.from_github_pr, actor=args.actor, source=args.source)

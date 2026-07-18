@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="470" viewBox="0 0 1200 470" role="img" aria-label="Example OSS candidate memory">
+  <rect width="1200" height="470" fill="#0b1020"/>
+  <rect x="45" y="42" width="1110" height="380" rx="10" fill="#111827" stroke="#334155"/>
+  <g font-family="Menlo, monospace" font-size="22"><text x="75" y="105" fill="#a7f3d0">$ memory oss-candidate upsert --from-json examples/oss-candidate.json</text><text x="75" y="165" fill="#f8fafc">OSS candidate: pytest-dev/pytest#14702</text><text x="75" y="210" fill="#94a3b8">identity: oss-candidate:pytest-dev/pytest#14702</text><text x="75" y="250" fill="#fbbf24">investigation: INVESTIGATE FURTHER | verdict: NONE</text><text x="75" y="295" fill="#cbd5e1">material_change: true updates this same note.</text><text x="75" y="340" fill="#cbd5e1">existing_user_pr or existing_external_pr forces SKIP.</text><text x="75" y="385" fill="#94a3b8">Structured result, not another session log.</text></g>
+</svg>

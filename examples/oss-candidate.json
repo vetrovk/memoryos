@@ -1,0 +1,15 @@
+{
+  "repository": "pytest-dev/pytest",
+  "issue_number": 14702,
+  "issue_title": "Fix doctest locations",
+  "issue_url": "https://github.com/pytest-dev/pytest/issues/14702",
+  "investigation_state": "INVESTIGATE FURTHER",
+  "verdict": "NONE",
+  "verdict_reason": "A pull request must be checked before starting duplicate work.",
+  "notes": "Use the stable identity to update the same candidate after new evidence arrives.",
+  "tests_or_reproduction": "Inspect the linked PR and run the focused test suite when available.",
+  "existing_user_pr": false,
+  "existing_external_pr": false,
+  "material_change": true,
+  "source": "oss-scout"
+}

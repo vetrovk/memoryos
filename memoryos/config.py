@@ -102,6 +102,10 @@ DEFAULT_CURATOR_CONFIG = {
     "near_duplicate_similarity": 0.8,
 }
 
+DEFAULT_PENDING_IMPORT_CONFIG = {
+    "paths": ["~/Documents"],
+}
+
 
 def curator_config_path(home: Path) -> Path:
     return home / "_system" / "config" / "curator.json"
@@ -121,4 +125,26 @@ def load_curator_config(home: Path) -> dict:
     for key in config:
         if key in custom and isinstance(custom[key], type(config[key])):
             config[key] = custom[key]
+    return config
+
+
+def pending_import_config_path(home: Path) -> Path:
+    return home / "_system" / "config" / "pending_import.json"
+
+
+def pending_import_state_path(home: Path) -> Path:
+    return home / "_system" / "cache" / "pending_imports.json"
+
+
+def load_pending_import_config(home: Path) -> dict:
+    config = {"paths": list(DEFAULT_PENDING_IMPORT_CONFIG["paths"])}
+    path = pending_import_config_path(home)
+    if not path.exists():
+        return config
+    try:
+        custom = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return config
+    if isinstance(custom, dict) and isinstance(custom.get("paths"), list):
+        config["paths"] = [str(item) for item in custom["paths"] if str(item).strip()]
     return config
