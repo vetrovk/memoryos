@@ -68,7 +68,7 @@ make doctor
 
 ## `memory learn`
 
-Saves a structured task-completion memory for agents.
+Saves a structured task-completion memory. The primary workflow is OpenAI Codex; other callers can use the same CLI or Python API without being a primary support target.
 
 Automatic session capture:
 

@@ -1,6 +1,6 @@
 # MemoryOS Architecture
 
-MemoryOS is a local first personal memory layer for humans and AI agents.
+MemoryOS is a local-first engineering memory layer built around daily OpenAI Codex workflows. It is independent open-source software, not a product of or affiliate of OpenAI. The CLI and Python API can be used by other callers, but Codex remains the primary target.
 
 It is not a notes app. Markdown files are the durable source material, SQLite is the fast local index, and the Python API is the stable surface used by CLI commands and future agents.
 

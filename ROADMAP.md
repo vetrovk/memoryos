@@ -26,5 +26,5 @@
 - Add vector search behind `SearchProvider`.
 - Add local web UI.
 - Add homelab sync with explicit allowlist.
-- Add optional adapters so Codex, ChatGPT, Claude Code, and other agents can call task learning with their native session metadata.
+- Consider optional adapters so Codex, ChatGPT, Claude Code, and other agents can call task learning with their native session metadata. These are future possibilities, not current support commitments.
 - Improve PR review extraction and map review comments to changed files.

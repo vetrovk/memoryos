@@ -4,9 +4,17 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Version](https://img.shields.io/github/v/tag/vetrovk/memoryos?label=version)](https://github.com/vetrovk/memoryos/tags)
 
-MemoryOS is a local Markdown and SQLite system for keeping engineering decisions, task outcomes, and investigation context searchable after a project session ends.
+MemoryOS is a local-first engineering memory system built for OpenAI Codex, keeping decisions, task outcomes, and investigation context searchable after a project session ends.
 
-It helps when an engineer or agent has already investigated a failure, reviewed a pull request, or rejected an OSS candidate, but the next person has to repeat that work because the useful conclusion was lost in a terminal, chat, or commit history.
+It was created around daily Codex engineering workflows. It helps when Codex has already investigated a failure, reviewed a pull request, or rejected an OSS candidate, but the next task has to repeat that work because the useful conclusion was lost in a terminal, chat, or commit history.
+
+## Primary Target
+
+- Built for OpenAI Codex.
+- Used daily in real engineering workflows with Codex.
+- Designed for persistent engineering knowledge, not chat-history storage.
+
+MemoryOS is an independent open-source project. It is not made by, operated by, or affiliated with OpenAI. `OpenAI` and `Codex` are trademarks of OpenAI and are used here only to identify the external tool MemoryOS targets.
 
 ![MemoryOS flow](docs/images/memory-flow.svg)
 
@@ -22,10 +30,20 @@ It helps when an engineer or agent has already investigated a failure, reviewed 
 
 No cloud service, external API, or LLM is required for the core workflow. GitHub PR capture optionally uses the locally configured `gh` CLI.
 
+## Agent Compatibility
+
+| Agent | Current status |
+| --- | --- |
+| OpenAI Codex | Primary supported workflow; used daily. |
+| ChatGPT Codex Work | Used in production through session learning and pending-record import. |
+| Claude Code | Not tested by this project. |
+| Gemini CLI | Not tested by this project. |
+| Other coding agents | Possible through the CLI or Python API, but not a primary focus. |
+
 ## How It Works
 
 ```text
-Developer or agent
+OpenAI Codex
         |
       Session
         |
