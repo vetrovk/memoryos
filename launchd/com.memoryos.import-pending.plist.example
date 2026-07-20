@@ -11,8 +11,10 @@
     <string>memoryos.cli</string>
     <string>import-pending</string>
   </array>
+  <key>RunAtLoad</key>
+  <true/>
   <key>WorkingDirectory</key>
-  <string>__MEMORYOS_REPOSITORY__</string>
+  <string>__MEMORYOS_HOME__</string>
   <key>StartCalendarInterval</key>
   <dict>
     <key>Hour</key>

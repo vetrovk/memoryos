@@ -1,6 +1,7 @@
 # Local runtime artifacts
 __pycache__/
 .pycache/
+.venv/
 *.pyc
 *.egg-info/
 .DS_Store

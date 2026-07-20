@@ -139,7 +139,8 @@ For a daily macOS job, copy and fill the placeholders in `launchd/com.memoryos.i
 
 ```bash
 cp launchd/com.memoryos.import-pending.plist.example ~/Library/LaunchAgents/com.memoryos.import-pending.plist
-# Replace __MEMORYOS_PYTHON__, __MEMORYOS_REPOSITORY__, and __MEMORYOS_HOME__.
+# Replace __MEMORYOS_PYTHON__ with a stable venv Python where MemoryOS is installed,
+# and replace __MEMORYOS_HOME__. Do not use the system Python or depend on the repository directory.
 launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.memoryos.import-pending.plist
 launchctl bootout gui/$(id -u)/com.memoryos.import-pending
 ```
