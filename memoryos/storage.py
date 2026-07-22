@@ -115,14 +115,8 @@ def ensure_dirs(home: Path) -> None:
         (home / folder).mkdir(parents=True, exist_ok=True)
 
 
-def migrate_legacy_database(home: Path) -> None:
-    new = database_path(home)
-    new.parent.mkdir(parents=True, exist_ok=True)
-
-
 def connect(home: Path) -> sqlite3.Connection:
     ensure_dirs(home)
-    migrate_legacy_database(home)
     con = sqlite3.connect(database_path(home))
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA journal_mode=WAL")

@@ -10,15 +10,19 @@ This repository contains MemoryOS, a local first Markdown and SQLite memory syst
 
 ## Commands
 
+After installing MemoryOS in an active virtual environment as described in the README, use the installed `memory` command:
+
 ```bash
-python3 -m memoryos.cli init
-python3 -m memoryos.cli rebuild
-python3 -m memoryos.cli doctor
-python3 -m memoryos.cli search "query"
-python3 -m memoryos.cli learn --project <project> --goal "<goal>"
-python3 -m memoryos.cli learn --from-session --actor codex --source codex
-python3 -m memoryos.cli import-pending --dry-run
+memory init
+memory rebuild
+memory doctor
+memory search "query"
+memory learn --project <project> --goal "<goal>"
+memory learn --from-session --actor codex --source codex
+memory import-pending --dry-run
 ```
+
+Do not fall back to the system Python or the repository-local `./memory` file. If `memory` is unavailable, install the project into the active virtual environment first.
 
 ## Rules
 
@@ -31,17 +35,13 @@ python3 -m memoryos.cli import-pending --dry-run
 
 ## MemoryOS workflow
 
-After every successfully completed task, after checks and before the final response to the user, the agent must update MemoryOS with:
+After every successfully completed task, after checks and before the final response to the user, the agent must update MemoryOS with the installed CLI:
 
 ```bash
-python3 -m memoryos.cli learn --from-session --actor codex --source codex
+memory learn --from-session --actor codex --source codex
 ```
 
-If the local launcher is available, this is also acceptable:
-
-```bash
-./memory learn --from-session --actor codex --source codex
-```
+The command must come from the active virtual environment. Do not use the system Python or a repository-local launcher as a fallback.
 
 In the final response, briefly state that MemoryOS was updated. If the learn command fails, report the error honestly in the final response instead of hiding it.
 

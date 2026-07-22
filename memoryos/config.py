@@ -80,10 +80,6 @@ def database_path(home: Path) -> Path:
     return home / "_system" / "database" / "memory.sqlite3"
 
 
-def legacy_database_path(home: Path) -> Path:
-    return home / "_system" / "memory.sqlite3"
-
-
 def log_path(home: Path) -> Path:
     return home / "_system" / "logs" / "memory.log"
 
