@@ -39,6 +39,16 @@ memory graph
 memory agents oracle --target AGENTS.md
 ```
 
+## `memory init`
+
+```bash
+memory init
+```
+
+Initializes an empty memory home with the required folders and local SQLite index. It does not add example notes, user records, or demo search results. Running it again preserves existing Markdown notes and rebuilds the derived index without overwriting user data.
+
+See [examples/example-decision.md](examples/example-decision.md) for a standalone note-format example. It is not installed into a memory home.
+
 ## Makefile Shortcuts
 
 ```bash

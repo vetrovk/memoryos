@@ -64,12 +64,14 @@ class Memory:
         ensure_dirs(self.home)
         con = self.connect()
         con.close()
-        created = 0
-        created += self._write_if_missing(self.home / "README.md", "# MemoryOS\n\nЛокальная персональная система памяти.\n")
-        created += self._write_if_missing(self.home / "PRIVACY.md", "# Privacy\n\nДанные хранятся локально и не отправляются наружу.\n")
-        examples = self._create_examples()
         indexed = self.rebuild()
-        return {"home": str(self.home), "database": str(database_path(self.home)), "created_docs": created, "created_examples": examples, "indexed": indexed}
+        return {
+            "home": str(self.home),
+            "database": str(database_path(self.home)),
+            "created_docs": 0,
+            "created_examples": 0,
+            "indexed": indexed,
+        }
 
     def add(self, note: NoteInput, actor: str = "local", reason: str = "manual add") -> Path:
         if note.type not in TYPE_FOLDERS:
@@ -2126,35 +2128,6 @@ class Memory:
             "related": split_tags(meta.get("related")),
             "aliases": split_tags(meta.get("aliases")),
         }
-
-    def _create_examples(self) -> int:
-        created = 0
-        examples = [
-            NoteInput(title="Example inbox note", type="idea", status="draft", tags=["example", "inbox"], text="Входящая заметка для последующей сортировки."),
-            NoteInput(title="Example decision", type="decision", project="memoryos", tags=["example", "decision"], text="Решение: MemoryOS использует Markdown, SQLite, FTS5, UUID и Python API."),
-        ]
-        for note in examples:
-            folder = self.home / TYPE_FOLDERS[note.type]
-            exists = False
-            for path in folder.glob("*.md"):
-                try:
-                    meta, _ = read_markdown(path)
-                    exists = str(meta.get("title") or path.stem).lower() == note.title.lower()
-                except Exception:
-                    exists = path.name.endswith(f"{slugify(note.title)}.md")
-                if exists:
-                    break
-            if not exists:
-                self.add(note, actor="system", reason="init example")
-                created += 1
-        return created
-
-    def _write_if_missing(self, path: Path, text: str) -> int:
-        if path.exists():
-            return 0
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
-        return 1
 
     def _unique_path(self, folder: Path, title: str) -> Path:
         base = f"{date_stamp()}-{slugify(title)}"

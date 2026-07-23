@@ -6,6 +6,7 @@ All notable public changes to MemoryOS are documented here.
 
 ### Fixed
 
+- Fresh memory homes now initialize without seeded example notes or root-level demo documents.
 - Completed session records no longer default to an active lifecycle status.
 - Rebuild now reports partial indexing failures and exits non-zero when the derived index is incomplete.
 - Pending import documentation now explains the default recursive scan scope and explicit `--path` use.

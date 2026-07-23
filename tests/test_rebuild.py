@@ -33,8 +33,8 @@ class RebuildTests(unittest.TestCase):
         report = self.memory.rebuild_report()
 
         self.assertEqual(report.failed, 1)
-        self.assertGreaterEqual(report.indexed, 3)
-        self.assertGreaterEqual(report.skipped, 3)
+        self.assertEqual(report.indexed, 1)
+        self.assertEqual(report.skipped, 1)
         self.assertEqual(report.failures, [(broken.resolve(), "invalid UTF-8")])
         self.assertEqual(valid.read_bytes(), valid_before)
         self.assertEqual(broken.read_bytes(), broken_before)

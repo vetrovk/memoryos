@@ -20,7 +20,13 @@ def build_parser() -> argparse.ArgumentParser:
         command_parser.add_argument("--home", dest="home_after", default=None, help=argparse.SUPPRESS)
         return command_parser
 
-    add_home(sub.add_parser("init"))
+    add_home(
+        sub.add_parser(
+            "init",
+            help="Initialize an empty memory home without example notes.",
+            description="Create the MemoryOS folders and SQLite index without adding example notes.",
+        )
+    )
     add_home(sub.add_parser("rebuild"))
     add_home(sub.add_parser("index"))
     add_home(sub.add_parser("digest"))
@@ -127,6 +133,11 @@ def main(argv: list[str] | None = None) -> int:
         info = memory.init()
         for key, value in info.items():
             print(f"{key}: {value}")
+        if info["indexed"] == 0:
+            print("initialized: empty memory home")
+            print("next: memory learn --project <project> --goal \"<goal>\"")
+        else:
+            print("initialized: existing memory preserved")
         return 0
     if args.command in {"rebuild", "index"}:
         report = memory.rebuild_report()

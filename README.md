@@ -91,7 +91,9 @@ memory learn \
 memory search "release checklist"
 ```
 
-The command creates Markdown under `$MEMORY_HOME` and updates its SQLite index immediately. Remove `.memory-demo/` when you no longer need the example.
+`memory init` creates an empty local memory home: folders and a SQLite index, but no example notes or user records. The first `memory learn` above creates Markdown under `$MEMORY_HOME` and updates its SQLite index immediately. Remove `.memory-demo/` when you no longer need the example.
+
+For a standalone note-format reference, see [examples/example-decision.md](examples/example-decision.md). It stays in the repository and is never copied into your memory home.
 
 To preview automatic session capture without saving a note:
 
