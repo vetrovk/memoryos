@@ -40,6 +40,7 @@ memory learn --project oracle --goal "Fix search" --action "Updated SearchProvid
 memory search "oracle bot"
 memory search --project oracle --type decision
 memory context oracle
+memory context oracle --session
 memory digest
 memory doctor
 memory rebuild
@@ -81,6 +82,17 @@ memory learn --from-session --actor codex --source codex --dry-run
 `--from-session` reads local git metadata only: current folder, git remote, `pyproject.toml`, `package.json`, README, `git status --short`, `git diff --stat`, changed files, and latest commit. It does not call external APIs and does not use an LLM.
 
 `--from-session` is curated before permanent save. It calculates `quality_score`, sets `outcome`, skips duplicates/no-signal sessions, and may save weak records to `_system/drafts/`.
+
+After a permanent `--from-session` save, MemoryOS verifies the Markdown file, required metadata, SQLite index, and retrieval through the normal FTS search path. A verification failure leaves the note untouched, exits non-zero, and suggests `memory doctor` or `memory rebuild` when the index is the failed check. Drafts are verified as files and metadata only; Curator skips remain successful skips.
+
+### Bounded session context
+
+```bash
+memory context memoryos --session
+memory context memoryos --session --limit 8 --max-bytes 4096
+```
+
+`--session` is opt-in and read-only. It does not write a note, export a file, start a background process, or call an LLM. The output uses existing indexed project memory, prioritizes active/unresolved records and relevant PR or OSS entities, then recent permanent notes. It is limited to the requested number of records and UTF-8 byte budget; the footer reports the actual size and whether output was truncated.
 
 Generated files are activity noise, not engineering memory. The curator filters dependencies, build output, caches, temporary folders, Python bytecode, logs, `.DS_Store`, and common minified bundles before computing score, links, aliases, and session fingerprints. Customize defaults with `~/Memory/_system/config/curator.json`; see `examples/curator.json`.
 

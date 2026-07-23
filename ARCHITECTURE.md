@@ -98,6 +98,10 @@ Core methods:
 - `memory.learn()`
 - `memory.import_pending()`
 
+`memory.context(project, session=True, limit=..., max_bytes=...)` is a separate read-only format for a bounded agent handoff. It uses the existing SQLite index and Markdown metadata, prioritizes active/unresolved records and project-scoped PR or OSS entities, and never writes an export file. The legacy `memory.context(project)` export behavior remains unchanged.
+
+After `learn_from_session()` saves a permanent note, MemoryOS verifies the file, frontmatter metadata, indexed row, and normal FTS retrieval before returning a permanent success result. Verification failure leaves the note intact and reports the failed checks. Drafts receive file/metadata verification only because they are intentionally outside the permanent search index.
+
 ## Automatic Task Learning
 
 `memory.learn()` records a finished agent task as a structured `session` object. It captures project, goal, completed actions, changed files, errors, decisions, commands, findings, and recommendations.

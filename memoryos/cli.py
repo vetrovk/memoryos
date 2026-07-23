@@ -77,6 +77,8 @@ def build_parser() -> argparse.ArgumentParser:
     context = add_home(sub.add_parser("context"))
     context.add_argument("project")
     context.add_argument("--limit", type=int, default=12)
+    context.add_argument("--session", action="store_true", help="Print a bounded, read-only session handoff instead of exporting a file.")
+    context.add_argument("--max-bytes", type=int, default=6144, help="Maximum UTF-8 bytes for --session output.")
 
     importer = add_home(sub.add_parser("import"))
     importer.add_argument("path")
@@ -162,7 +164,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"   {result.snippet}")
         return 0
     if args.command == "context":
-        print(f"Exported: {memory.context(args.project, limit=args.limit)}")
+        try:
+            result = memory.context(args.project, limit=args.limit, session=args.session, max_bytes=args.max_bytes)
+        except ValueError as exc:
+            parser.error(str(exc))
+        if args.session:
+            print(result, end="")
+        else:
+            print(f"Exported: {result}")
         return 0
     if args.command == "import":
         print(f"Imported files: {memory.import_repo(Path(args.path), project=args.project)}")
@@ -201,7 +210,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(memory.render_session_preview(result))
             else:
                 print(result.message)
-            return 0
+            return 1 if result.disposition == "verification_failed" else 0
         payload = _learning_payload(args)
         allowed = {field.name for field in fields(TaskLearningInput)}
         path = memory.learn(TaskLearningInput(**{key: value for key, value in payload.items() if key in allowed}))

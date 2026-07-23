@@ -21,7 +21,7 @@ from .config import (
 )
 from .models import LearningSaveResult, NoteInput, SearchResult, SessionLearningPreview, TaskLearningInput
 from .search import SQLiteFTSSearchProvider
-from .storage import add_history, connect, ensure_dirs, init_db, log_error
+from .storage import add_history, connect, connect_read_only, ensure_dirs, init_db, log_error
 from .util import build_markdown, date_stamp, now_text, read_markdown, short_snippet, slugify, split_tags, uuid_text
 
 
@@ -29,6 +29,8 @@ COMMAND_RE = re.compile(r"^\s*(?:[-*]\s*)?(git|docker|systemctl|sqlite3?|python3
 PERMANENT_SCORE_THRESHOLD = 3
 SKIP_SCORE_THRESHOLD = -4
 TEMP_PROJECTS = {"tmp", "temp", "temporary", "plugin-computer-use-openai-bundled-play"}
+SESSION_CONTEXT_DEFAULT_MAX_BYTES = 6144
+SESSION_CONTEXT_MIN_MAX_BYTES = 256
 
 
 class Memory:
@@ -359,11 +361,24 @@ class Memory:
         if preview.disposition == "draft" and draft:
             path = self.save_draft(preview.learning, reason=preview.reason)
             self._record_curator_event("curator_saved_draft", preview.learning, preview.reason, path=str(path))
-            return LearningSaveResult("draft", f"saved as draft: {path}", str(path), preview.learning.quality_score, preview.reason)
+            verification = self._verify_session_save(path, preview.learning, draft=True)
+            if not verification["ok"]:
+                return self._verification_failure(path, preview.learning, verification)
+            return LearningSaveResult("draft", f"saved as draft: {path}\nverified: yes", str(path), preview.learning.quality_score, preview.reason, verification)
         path = self.learn(preview.learning)
         note_id = self._note_id_for_path(path)
         self._record_curator_event("curator_saved_permanent", preview.learning, preview.reason, note_id, str(path))
-        return LearningSaveResult("permanent", f"saved to permanent memory: {path}", str(path), preview.learning.quality_score, preview.reason)
+        verification = self._verify_session_save(path, preview.learning)
+        if not verification["ok"]:
+            return self._verification_failure(path, preview.learning, verification)
+        return LearningSaveResult(
+            "permanent",
+            f"saved to permanent memory: {path}\nindexed: yes\nsearchable: yes\nverified: yes",
+            str(path),
+            preview.learning.quality_score,
+            preview.reason,
+            verification,
+        )
 
     def collect_session_learning(
         self,
@@ -1138,7 +1153,15 @@ class Memory:
             parts.append("")
         return "\n".join(parts).rstrip() + "\n"
 
-    def context(self, project: str, limit: int = 12) -> Path:
+    def context(
+        self,
+        project: str,
+        limit: int = 12,
+        session: bool = False,
+        max_bytes: int = SESSION_CONTEXT_DEFAULT_MAX_BYTES,
+    ) -> Path | str:
+        if session:
+            return self._session_context(project, limit=limit, max_bytes=max_bytes)
         con = self.connect()
         rows = con.execute("SELECT * FROM notes WHERE lower(project) = lower(?) ORDER BY updated DESC", (project,)).fetchall()
         sections = [
@@ -1183,6 +1206,182 @@ class Memory:
         path = export_dir / f"context_{slugify(project, 'project')}_{date_stamp()}.md"
         path.write_text("\n".join(out).rstrip() + "\n", encoding="utf-8")
         return path
+
+    def _session_context(self, project: str, limit: int, max_bytes: int) -> str:
+        """Return a compact, read-only handoff from indexed project memory."""
+        if limit < 1:
+            raise ValueError("Session context limit must be at least 1")
+        if max_bytes < SESSION_CONTEXT_MIN_MAX_BYTES:
+            raise ValueError(f"Session context max_bytes must be at least {SESSION_CONTEXT_MIN_MAX_BYTES}")
+
+        rows: list[sqlite3.Row] = []
+        if database_path(self.home).exists():
+            con = connect_read_only(self.home)
+            rows = con.execute(
+                "SELECT * FROM notes WHERE lower(project) = lower(?) ORDER BY updated DESC, title ASC, id ASC",
+                (project,),
+            ).fetchall()
+            con.close()
+
+        entries = [self._session_context_entry(row) for row in rows]
+        unresolved_statuses = {"blocked", "investigate further", "investigate_further", "unresolved", "open"}
+        unresolved_outcomes = {"blocked", "investigate further", "investigate_further", "unresolved", "open"}
+        terminal_outcomes = {"completed", "merged", "closed", "rejected", "failed", "no_changes"}
+        active = [
+            item
+            for item in entries
+            if item["status"] in unresolved_statuses
+            or item["outcome"] in unresolved_outcomes
+            or (item["status"] == "active" and item["outcome"] not in terminal_outcomes)
+        ]
+        active.sort(key=lambda item: 0 if item["status"] in unresolved_statuses or item["outcome"] in unresolved_outcomes else 1)
+        entities = [item for item in active if item["type"] in {"github_pr_learning", "oss_candidate"}]
+        active_notes = [item for item in active if item not in entities]
+        recent = [item for item in entries if item not in active]
+        drafts = self._session_context_drafts(project)
+
+        blocks = [f"# Session context: {project}", "", "## Project", f"- Filter: {project}"]
+        included: set[str] = set()
+        remaining = limit
+        for heading, items, entity in (
+            ("Active or unresolved", active_notes, False),
+            ("Relevant entities", entities, True),
+            ("Recent memories", recent, False),
+        ):
+            selected = [item for item in items if item["id"] not in included][:remaining]
+            if not selected:
+                continue
+            blocks.extend(["", f"## {heading}"])
+            for item in selected:
+                blocks.append(self._format_session_context_item(item, entity=entity))
+                included.add(item["id"])
+                remaining -= 1
+            if remaining == 0:
+                break
+
+        warnings: list[str] = []
+        if not rows:
+            warnings.append("project not found")
+        if drafts:
+            warnings.append(f"draft records: {len(drafts)}")
+        unresolved_count = len({item["id"] for item in active})
+        if unresolved_count:
+            warnings.append(f"active or unresolved records: {unresolved_count}")
+        if len(entries) > len(included):
+            warnings.append("result limited by --limit")
+        if len(entries) + len(drafts) < 2:
+            warnings.append("too little project memory")
+        if warnings:
+            blocks.extend(["", "## Warnings", *[f"- {warning}" for warning in warnings]])
+
+        return self._bounded_session_context(blocks, max_bytes, truncated=len(entries) > len(included))
+
+    def _session_context_entry(self, row: sqlite3.Row) -> dict[str, str]:
+        path = self.home / row["path"]
+        meta: dict[str, object] = {}
+        if path.exists():
+            try:
+                meta, _ = read_markdown(path)
+            except Exception:
+                pass
+        return {
+            "id": str(row["id"]),
+            "title": str(row["title"]),
+            "type": str(row["type"]),
+            "status": str(meta.get("status") or row["status"] or "").lower(),
+            "outcome": str(meta.get("outcome") or "").lower(),
+            "updated": str(row["updated"] or ""),
+            "identity": str(meta.get("identity_key") or ""),
+            "summary": short_snippet(row["content"], size=220).replace("\n", " ").strip(),
+        }
+
+    def _session_context_drafts(self, project: str) -> list[dict[str, object]]:
+        draft_dir = self.home / "_system" / "drafts"
+        records: list[dict[str, object]] = []
+        for path in sorted(draft_dir.glob("*.md")):
+            try:
+                meta, _ = read_markdown(path)
+            except Exception:
+                continue
+            if str(meta.get("project") or "").lower() == project.lower():
+                records.append(meta)
+        records.sort(key=lambda item: str(item.get("title") or ""))
+        records.sort(key=lambda item: str(item.get("updated") or ""), reverse=True)
+        return records
+
+    def _format_session_context_item(self, item: dict[str, str], entity: bool) -> str:
+        fields = [f"- {item['title']} [{item['type']}]", f"  updated: {item['updated'] or '-'}"]
+        if item["status"]:
+            fields.append(f"  status: {item['status']}")
+        if item["outcome"]:
+            fields.append(f"  outcome: {item['outcome']}")
+        if entity and item["identity"]:
+            fields.append(f"  identity: {item['identity']}")
+        if item["summary"]:
+            fields.append(f"  {item['summary']}")
+        return "\n".join(fields)
+
+    def _bounded_session_context(self, blocks: list[str], max_bytes: int, truncated: bool) -> str:
+        retained = list(blocks)
+        while True:
+            body = "\n".join(retained).rstrip() + "\n"
+            footer = ""
+            for _ in range(4):
+                size = len((body + footer).encode("utf-8"))
+                footer = f"Context size: {size} bytes | truncated: {str(truncated).lower()}\n"
+            output = body + footer
+            if len(output.encode("utf-8")) <= max_bytes:
+                return output
+            if len(retained) <= 4:
+                raise ValueError("Session context max_bytes is too small for the required header")
+            truncated = True
+            retained.pop()
+
+    def _verify_session_save(self, path: Path, learning: TaskLearningInput, draft: bool = False) -> dict[str, bool]:
+        checks = {"file": False, "metadata": False, "indexed": False, "searchable": False, "ok": False}
+        if not path.exists():
+            return checks
+        checks["file"] = True
+        try:
+            meta, _ = read_markdown(path)
+        except Exception:
+            return checks
+        note_id = str(meta.get("id") or "")
+        expected_type = "session_draft" if draft else "session"
+        expected_status = "draft" if draft else learning.status
+        checks["metadata"] = bool(note_id) and (
+            str(meta.get("type") or "") == expected_type
+            and str(meta.get("project") or "") == learning.project
+            and str(meta.get("status") or "") == expected_status
+            and str(meta.get("outcome") or "") == learning.outcome
+        )
+        if not checks["metadata"] or draft:
+            checks["ok"] = checks["file"] and checks["metadata"]
+            return checks
+        row = self.note(note_id)
+        checks["indexed"] = bool(
+            row
+            and row["path"] == str(path.relative_to(self.home))
+            and row["type"] == expected_type
+            and (row["project"] or "") == learning.project
+            and (row["status"] or "") == learning.status
+        )
+        if checks["indexed"] and learning.goal:
+            results = self.search(query=learning.goal, project=learning.project, note_type="session", limit=20)
+            checks["searchable"] = any(result.id == note_id for result in results)
+        checks["ok"] = all(value for key, value in checks.items() if key != "ok")
+        return checks
+
+    def _verification_failure(self, path: Path, learning: TaskLearningInput, verification: dict[str, bool]) -> LearningSaveResult:
+        failed = ", ".join(key for key, ok in verification.items() if key != "ok" and not ok)
+        return LearningSaveResult(
+            "verification_failed",
+            f"saved, but verification failed ({failed}): {path}\nRun memory doctor; use memory rebuild if the index is missing.",
+            str(path),
+            learning.quality_score,
+            failed,
+            verification,
+        )
 
     def export_context(self, project: str, limit: int = 12) -> Path:
         return self.context(project, limit=limit)

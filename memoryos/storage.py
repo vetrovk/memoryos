@@ -124,6 +124,14 @@ def connect(home: Path) -> sqlite3.Connection:
     return con
 
 
+def connect_read_only(home: Path) -> sqlite3.Connection:
+    """Open an existing MemoryOS index without creating folders or WAL files."""
+    path = database_path(home)
+    con = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
+    con.row_factory = sqlite3.Row
+    return con
+
+
 def init_db(con: sqlite3.Connection) -> None:
     con.executescript(SCHEMA)
     con.commit()

@@ -81,3 +81,4 @@ class LearningSaveResult:
     path: str = ""
     quality_score: int = 0
     reason: str = ""
+    verification: dict[str, bool] = field(default_factory=dict)

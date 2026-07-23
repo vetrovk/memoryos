@@ -99,6 +99,15 @@ To preview automatic session capture without saving a note:
 memory learn --from-session --actor codex --source codex --dry-run
 ```
 
+To prepare a compact, read-only handoff for a known project:
+
+```bash
+memory context memoryos --session
+memory context memoryos --session --limit 8 --max-bytes 4096
+```
+
+Session context is opt-in. It uses existing project memory only, writes nothing, starts no hooks or background process, and reports its actual UTF-8 size and truncation state. After a permanent `memory learn --from-session` save, MemoryOS verifies the Markdown file, metadata, SQLite index, and normal search retrieval before reporting success.
+
 ## Examples
 
 ### Search a saved decision
