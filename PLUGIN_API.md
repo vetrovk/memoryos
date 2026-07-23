@@ -1,9 +1,12 @@
-# MemoryOS Plugin API
+# MemoryOS Extension Boundary
 
-Plugins are intentionally minimal in the MVP.
+MemoryOS currently exposes a small experimental extension boundary for future importers and automations. It is not a dynamic plugin system and does not define a stable third-party plugin compatibility API.
+
+The codebase exports `BasePlugin` and ships one concrete implementation, `FilesystemPlugin`. `FilesystemPlugin` is a thin wrapper around `memory.import_path()`; the CLI does not discover or load plugins automatically.
 
 ```python
 from memoryos.plugins import BasePlugin
+
 
 class MyPlugin(BasePlugin):
     name = "my_plugin"
@@ -19,14 +22,4 @@ plugin = MyPlugin(memory)
 plugin.run()
 ```
 
-## Planned Plugins
-
-- GitHub
-- Obsidian
-- Telegram
-- RSS
-- Filesystem
-- Log Parser
-- Session Importer
-
-The first included plugin is `FilesystemPlugin`, used as a simple importer wrapper around `memory.import_path()`.
+There is currently no plugin registry, configuration-driven loading, Python entry-point loading, external package registration, or compatibility commitment for third-party plugins. Treat this boundary as an internal, beta-level extension point that may change before v1.0.

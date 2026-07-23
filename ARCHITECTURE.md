@@ -11,8 +11,7 @@ It is not a notes app. Markdown files are the durable source material, SQLite is
 - Markdown First
 - SQLite First
 - Human Readable
-- Extensible
-- Plugin Based
+- Modular Internal Boundaries
 - Safe by Default
 
 ## Folder Layout
@@ -101,6 +100,12 @@ Core methods:
 `memory.context(project, session=True, limit=..., max_bytes=...)` is a separate read-only format for a bounded agent handoff. It uses the existing SQLite index and Markdown metadata, prioritizes active/unresolved records and project-scoped PR or OSS entities, and never writes an export file. The legacy `memory.context(project)` export behavior remains unchanged.
 
 After `learn_from_session()` saves a permanent note, MemoryOS verifies the file, frontmatter metadata, indexed row, and normal FTS retrieval before returning a permanent success result. Verification failure leaves the note intact and reports the failed checks. Drafts receive file/metadata verification only because they are intentionally outside the permanent search index.
+
+## Storage and Extension Boundaries
+
+The current release stores durable notes as Markdown files on the local filesystem and maintains SQLite as a derived index. It ships with one experimental extension boundary: `BasePlugin` and `FilesystemPlugin`, a small wrapper around `memory.import_path()`.
+
+MemoryOS does not currently provide dynamic plugin discovery, configuration-driven loading, Python entry-point loading, third-party registration, multiple shipped plugin backends, or a stable external plugin compatibility guarantee. The boundary keeps future extension work contained without presenting the project as a plugin platform.
 
 ## Automatic Task Learning
 

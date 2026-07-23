@@ -4,6 +4,14 @@ All notable public changes to MemoryOS are documented here.
 
 ## [0.2.1] - 2026-07-23
 
+### Added
+
+- GitHub Private Vulnerability Reporting through the repository Security Advisories flow.
+
+### Changed
+
+- Clarified that the current filesystem import extension is an internal boundary, not a dynamic plugin system.
+
 ### Fixed
 
 - Fresh memory homes now initialize without seeded example notes or root-level demo documents.
