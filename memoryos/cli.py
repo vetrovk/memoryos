@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from dataclasses import fields
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from .api import Memory
@@ -14,6 +15,11 @@ from .util import split_tags
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="memory", description="MemoryOS local knowledge system.")
     parser.add_argument("--home", default=None, help="Memory folder, default: ~/Memory or MEMORY_HOME")
+    try:
+        package_version = version("memoryos-local")
+    except PackageNotFoundError:
+        package_version = "unknown"
+    parser.add_argument("--version", action="version", version=f"%(prog)s {package_version}")
     sub = parser.add_subparsers(dest="command", required=True)
 
     def add_home(command_parser: argparse.ArgumentParser) -> argparse.ArgumentParser:

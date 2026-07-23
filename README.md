@@ -197,7 +197,7 @@ MemoryOS has no bulk-delete command. Archive or remove local Markdown notes with
 
 ## Current Status
 
-MemoryOS v0.2.0 is an actively used public beta. The command-line workflow and Markdown format are usable now; the Python API and note schema may still change before a stable 1.0 release. Bug reports and focused issues through GitHub Issues, plus small pull requests, are welcome.
+MemoryOS v0.2.1 is an actively used public beta. The command-line workflow and Markdown format are usable now; the Python API and note schema may still change before a stable 1.0 release. Bug reports and focused issues through GitHub Issues, plus small pull requests, are welcome.
 
 ## Development
 
