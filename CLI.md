@@ -124,14 +124,19 @@ memory learn --from-json task-learning.json
 
 `--from-json -` reads JSON from stdin.
 
+## `memory rebuild`
+
+Rebuild refreshes the derived SQLite index from eligible Markdown notes. It does not delete Markdown files or rewrite their frontmatter. The command prints `scanned`, `indexed`, `skipped`, and `failed` counts. It exits with `0` only when every eligible note was indexed; a partial index exits non-zero and lists each failed path with a short safe reason. Rebuild remains non-atomic in this beta: successfully indexed notes stay searchable, while failed notes remain in Markdown and should be inspected before retrying.
+
 ## `memory import-pending`
 
-Imports local Codex Work files matching `.memoryos_pending/*.json` recursively. Default roots come from `~/Memory/_system/config/pending_import.json` and default to `~/Documents`.
+Imports local Codex Work files matching `.memoryos_pending/*.json` recursively. Default roots come from `~/Memory/_system/config/pending_import.json` and default to `~/Documents`. The scan reads only matching pending JSON files, not arbitrary documents under those roots. Use `--path` to avoid scanning all of `~/Documents`.
 
 ```bash
 memory import-pending
 memory import-pending --dry-run
 memory import-pending --days 7
+memory import-pending --dry-run --path "/path/to/projects"
 memory import-pending --path "/path/to/projects"
 ```
 

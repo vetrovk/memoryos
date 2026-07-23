@@ -146,12 +146,15 @@ memory search "oss-candidate:pytest-dev/pytest#14702"
 
 ### Import local agent records
 
+By default, `memory import-pending` recursively searches `~/Documents` for files matching `.memoryos_pending/*.json`. It reads only those matching pending JSON files, not arbitrary documents. To avoid scanning all of `~/Documents`, pass one or more explicit project roots with `--path`.
+
 ```bash
 memory import-pending --dry-run
-memory import-pending --path "$HOME/Documents" --days 7
+memory import-pending --dry-run --path "/path/to/projects"
+memory import-pending --path "/path/to/projects" --days 7
 ```
 
-Successful files are indexed and moved to a sibling `.memoryos_pending/archive/` folder. Failed JSON files stay in place and are logged locally.
+`--dry-run` does not import, move, or delete files. Successful files are indexed and moved to a sibling `.memoryos_pending/archive/` folder. Failed JSON files stay in place and are logged locally.
 
 ## Activity Log Vs. Memory
 
@@ -178,7 +181,7 @@ See [PRIVACY.md](PRIVACY.md) and [.gitignore](.gitignore).
 
 ## Local Data Lifecycle
 
-MemoryOS has no bulk-delete command. Archive or remove local Markdown notes with normal filesystem tools, then run `memory rebuild` to recreate the SQLite index from the remaining notes. Back up important local memory before upgrading a beta release.
+MemoryOS has no bulk-delete command. Archive or remove local Markdown notes with normal filesystem tools, then run `memory rebuild` to recreate the SQLite index from the remaining notes. Rebuild reports incomplete indexing with a non-zero exit code and leaves failed Markdown notes untouched. Back up important local memory before upgrading a beta release.
 
 ## Documentation
 

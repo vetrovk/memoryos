@@ -2,6 +2,15 @@
 
 All notable public changes to MemoryOS are documented here.
 
+## [0.2.1] - 2026-07-23
+
+### Fixed
+
+- Completed session records no longer default to an active lifecycle status.
+- Rebuild now reports partial indexing failures and exits non-zero when the derived index is incomplete.
+- Pending import documentation now explains the default recursive scan scope and explicit `--path` use.
+- Public privacy documentation is consistently available in English.
+
 ## [0.2.0] - 2026-07-23
 
 ### Added

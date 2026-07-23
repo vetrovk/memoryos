@@ -3,6 +3,8 @@ from __future__ import annotations
 import subprocess
 import tempfile
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
@@ -10,6 +12,7 @@ from memoryos import Memory
 from memoryos.cli import main
 from memoryos.config import database_path
 from memoryos.models import NoteInput, SessionLearningPreview, TaskLearningInput
+from memoryos.util import read_markdown
 
 
 class SessionContextTests(unittest.TestCase):
@@ -36,7 +39,7 @@ class SessionContextTests(unittest.TestCase):
 
     def test_session_context_filters_orders_and_includes_relevant_entities(self) -> None:
         self._add("Completed memory")
-        self._add("Completed active status", status="active", outcome="completed")
+        legacy_path = self._add("Completed active status", status="active", outcome="completed")
         self._add("Blocked work", status="blocked", outcome="blocked")
         self._add(
             "Relevant PR",
@@ -65,6 +68,17 @@ class SessionContextTests(unittest.TestCase):
         self.assertNotIn("Unrelated PR", output)
         self.assertLess(output.index("Blocked work"), output.index("Completed memory"))
         self.assertGreater(output.index("Completed active status"), output.index("## Recent memories"))
+        legacy = output[output.index("Completed active status") :]
+        self.assertIn("status: completed", legacy)
+        self.assertNotIn("status: active", legacy)
+
+        rendered = StringIO()
+        with redirect_stdout(rendered):
+            code = main(["--home", str(self.home), "context", "alpha", "--session"])
+        self.assertEqual(code, 0)
+        self.assertNotIn("status: active\n  outcome: completed", rendered.getvalue())
+        legacy_meta, _ = read_markdown(legacy_path)
+        self.assertEqual(legacy_meta["status"], "active")
 
     def test_session_context_has_stable_title_tiebreaker(self) -> None:
         self._add("Zulu memory")
@@ -128,6 +142,20 @@ class SessionVerificationTests(unittest.TestCase):
         self.assertTrue(result.verification["ok"])
         self.assertTrue(result.verification["searchable"])
         self.assertIn("verified: yes", result.message)
+        meta, _ = read_markdown(Path(result.path))
+        self.assertEqual(meta["outcome"], "completed")
+        self.assertEqual(meta["status"], "completed")
+
+        preview = self.memory.collect_session_learning(project="fixture", goal="Preview completed status", cwd=self.root)
+        self.assertEqual(preview.learning.status, "completed")
+
+    def test_open_workflow_keeps_active_status(self) -> None:
+        path = self.memory.learn(TaskLearningInput(project="fixture", goal="Open investigation", outcome="open"))
+
+        meta, _ = read_markdown(path)
+
+        self.assertEqual(meta["status"], "active")
+        self.assertEqual(meta["outcome"], "open")
 
     def test_skipped_session_does_not_run_verification(self) -> None:
         result = self.memory.learn_from_session(project="fixture", cwd=self.root)

@@ -85,9 +85,9 @@ def build_parser() -> argparse.ArgumentParser:
     importer.add_argument("--project", default="")
 
     pending_importer = add_home(sub.add_parser("import-pending"))
-    pending_importer.add_argument("--path", action="append", default=[], help="Project root to search; repeatable.")
+    pending_importer.add_argument("--path", action="append", default=[], help="Project root to search; repeatable. Default roots are configured paths or ~/Documents.")
     pending_importer.add_argument("--days", type=int, default=None, help="Only process JSON files modified in the last N days.")
-    pending_importer.add_argument("--dry-run", action="store_true", help="Report pending files without saving or archiving them.")
+    pending_importer.add_argument("--dry-run", action="store_true", help="Report matching .memoryos_pending JSON files without saving or archiving them.")
 
     learn = add_home(sub.add_parser("learn"))
     learn.add_argument("--from-json", default="", help="Read learning payload from JSON file, or '-' for stdin.")
@@ -129,8 +129,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{key}: {value}")
         return 0
     if args.command in {"rebuild", "index"}:
-        print(f"Indexed notes: {memory.rebuild()}")
-        return 0
+        report = memory.rebuild_report()
+        print(f"scanned: {report.scanned}")
+        print(f"indexed: {report.indexed}")
+        print(f"skipped: {report.skipped}")
+        print(f"failed: {report.failed}")
+        for path, reason in report.failures:
+            print(f"- failed: {path} ({reason})")
+        return 0 if report.failed == 0 else 1
     if args.command == "add":
         note_type = "health_note" if args.type == "health" else args.type
         path = memory.add(

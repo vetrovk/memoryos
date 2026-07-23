@@ -6,6 +6,7 @@ import sqlite3
 import subprocess
 import hashlib
 import shutil
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
@@ -31,6 +32,23 @@ SKIP_SCORE_THRESHOLD = -4
 TEMP_PROJECTS = {"tmp", "temp", "temporary", "plugin-computer-use-openai-bundled-play"}
 SESSION_CONTEXT_DEFAULT_MAX_BYTES = 6144
 SESSION_CONTEXT_MIN_MAX_BYTES = 256
+TERMINAL_STATUS_FOR_OUTCOME = {
+    "completed": "completed",
+    "merged": "merged",
+    "closed": "closed",
+    "rejected": "rejected",
+    "failed": "failed",
+    "no_changes": "completed",
+}
+
+
+@dataclass
+class RebuildReport:
+    scanned: int
+    indexed: int = 0
+    skipped: int = 0
+    failed: int = 0
+    failures: list[tuple[Path, str]] = field(default_factory=list)
 
 
 class Memory:
@@ -88,6 +106,7 @@ class Memory:
 
     def learn(self, learning: TaskLearningInput) -> Path:
         """Persist a structured task-completion memory and refresh SQLite indexes."""
+        self._normalize_learning_status(learning)
         title = f"Task learned: {learning.goal}"
         tags = split_tags(["task-learning", "agent-learning", *learning.tags])
         body = self._render_learning_body(learning)
@@ -439,6 +458,7 @@ class Memory:
             ignored_changed_files_count=len(ignored_changed_files),
             ignored_changed_file_examples=ignored_changed_files[:8],
         )
+        self._normalize_learning_status(learning)
         quality_score, quality_reason = self.score_learning(learning, last_commit=last_commit)
         learning.curator_fingerprint = self._session_fingerprint(learning, last_commit, useful_diff_stat)
         duplicate_reason, related_note_id, related_note_path = self._duplicate_reason(learning, last_commit, useful_diff_stat)
@@ -1071,6 +1091,13 @@ class Memory:
         return results
 
     def rebuild(self) -> int:
+        """Rebuild the derived index and return the number of indexed notes."""
+        return self.rebuild_report().indexed
+
+    def rebuild_report(self) -> RebuildReport:
+        """Rebuild the derived index and retain safe diagnostics for failed notes."""
+        paths, skipped = self._rebuild_paths()
+        report = RebuildReport(scanned=len(paths), skipped=skipped)
         con = self.connect()
         con.execute("DELETE FROM fts_index")
         con.execute("DELETE FROM commands")
@@ -1082,17 +1109,28 @@ class Memory:
         con.execute("DELETE FROM people")
         con.execute("DELETE FROM repositories")
         con.execute("DELETE FROM notes")
-        indexed = 0
-        for path in self.markdown_files():
+        for path in paths:
             try:
+                meta, _ = read_markdown(path)
+                if not str(meta.get("id") or "").strip():
+                    raise ValueError("missing frontmatter id")
                 self._upsert_path(con, path)
-                indexed += 1
+                report.indexed += 1
             except Exception as exc:  # noqa: BLE001 - indexing should continue.
-                log_error(self.home, f"index failed for {path}: {exc}")
-        add_history(con, None, "rebuild", reason="full index rebuild", payload={"indexed": indexed})
+                reason = self._rebuild_failure_reason(exc)
+                report.failed += 1
+                report.failures.append((path, reason))
+                log_error(self.home, f"index failed for {path}: {reason}")
+        add_history(
+            con,
+            None,
+            "rebuild",
+            reason="full index rebuild",
+            payload={"scanned": report.scanned, "indexed": report.indexed, "skipped": report.skipped, "failed": report.failed},
+        )
         con.commit()
         con.close()
-        return indexed
+        return report
 
     def import_path(self, path: Path, project: str = "") -> int:
         path = path.expanduser().resolve()
@@ -1284,12 +1322,16 @@ class Memory:
                 meta, _ = read_markdown(path)
             except Exception:
                 pass
+        status = str(meta.get("status") or row["status"] or "").lower()
+        outcome = str(meta.get("outcome") or "").lower()
+        if status == "active" and outcome in TERMINAL_STATUS_FOR_OUTCOME:
+            status = TERMINAL_STATUS_FOR_OUTCOME[outcome]
         return {
             "id": str(row["id"]),
             "title": str(row["title"]),
             "type": str(row["type"]),
-            "status": str(meta.get("status") or row["status"] or "").lower(),
-            "outcome": str(meta.get("outcome") or "").lower(),
+            "status": status,
+            "outcome": outcome,
             "updated": str(row["updated"] or ""),
             "identity": str(meta.get("identity_key") or ""),
             "summary": short_snippet(row["content"], size=220).replace("\n", " ").strip(),
@@ -1483,15 +1525,37 @@ class Memory:
         return path
 
     def markdown_files(self) -> list[Path]:
-        skipped = {self.home / "_system"}
+        files, _ = self._rebuild_paths()
+        return files
+
+    def _rebuild_paths(self) -> tuple[list[Path], int]:
+        skipped_roots = {self.home / "_system"}
         files: list[Path] = []
+        skipped = 0
         for path in self.home.rglob("*.md"):
             if path.parent == self.home:
+                skipped += 1
                 continue
-            if any(path == folder or folder in path.parents for folder in skipped):
+            if any(path == folder or folder in path.parents for folder in skipped_roots):
+                skipped += 1
                 continue
             files.append(path)
-        return sorted(files)
+        return sorted(files), skipped
+
+    @staticmethod
+    def _rebuild_failure_reason(exc: Exception) -> str:
+        if isinstance(exc, UnicodeError):
+            return "invalid UTF-8"
+        if isinstance(exc, OSError):
+            return "file read error"
+        if isinstance(exc, ValueError) and str(exc) == "missing frontmatter id":
+            return "missing frontmatter id"
+        return f"indexing error: {type(exc).__name__}"
+
+    @staticmethod
+    def _normalize_learning_status(learning: TaskLearningInput) -> None:
+        if learning.status == "active" and learning.outcome in TERMINAL_STATUS_FOR_OUTCOME:
+            learning.status = TERMINAL_STATUS_FOR_OUTCOME[learning.outcome]
 
     def _upsert_path(self, con: sqlite3.Connection, path: Path) -> None:
         meta, content = read_markdown(path)
