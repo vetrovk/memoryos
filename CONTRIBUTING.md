@@ -13,8 +13,8 @@ Thanks for helping improve MemoryOS.
 
 ```bash
 python -m pip install -e .
-python3 -m unittest discover -s tests -v
-PYTHONPYCACHEPREFIX=/tmp/memoryos-pycache python3 -m py_compile memoryos/*.py
+python -m unittest discover -s tests -v
+PYTHONPYCACHEPREFIX=/tmp/memoryos-pycache python -m compileall memoryos
 git diff --check
 ```
 

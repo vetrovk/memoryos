@@ -38,6 +38,9 @@ jobs:
           memory init
           memory learn --project demo --goal "Record the release checklist" --action "Created a local demo" --decision "Keep durable notes as Markdown" --finding "SQLite FTS5 returns the saved conclusion" --actor ci --source ci
           memory search "release checklist"
+          memory context demo --session --limit 8 --max-bytes 4096
+          memory import-pending --dry-run --path "$RUNNER_TEMP"
+          memory doctor
           memory oss-candidate upsert --from-json examples/oss-candidate.json
           memory search "oss-candidate:pytest-dev/pytest#14702"
           memory github-pr-deduplicate --dry-run

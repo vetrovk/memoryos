@@ -108,6 +108,8 @@ memory context memoryos --session --limit 8 --max-bytes 4096
 
 Session context is opt-in. It uses existing project memory only, writes nothing, starts no hooks or background process, and reports its actual UTF-8 size and truncation state. After a permanent `memory learn --from-session` save, MemoryOS verifies the Markdown file, metadata, SQLite index, and normal search retrieval before reporting success.
 
+If an agent cannot write the configured memory home because of a readonly database or sandbox boundary, the Codex workflow can leave a Codex Work JSON record in `.memoryos_pending/` inside the project. Import it later with `memory import-pending`; successful files are archived beside their source. MemoryOS does not send this data to a cloud service.
+
 ## Examples
 
 ### Search a saved decision
@@ -174,6 +176,10 @@ MemoryOS stores decisions and outcomes rather than a raw conversation history. M
 
 See [PRIVACY.md](PRIVACY.md) and [.gitignore](.gitignore).
 
+## Local Data Lifecycle
+
+MemoryOS has no bulk-delete command. Archive or remove local Markdown notes with normal filesystem tools, then run `memory rebuild` to recreate the SQLite index from the remaining notes. Back up important local memory before upgrading a beta release.
+
 ## Documentation
 
 - [CLI reference](CLI.md)
@@ -186,22 +192,12 @@ See [PRIVACY.md](PRIVACY.md) and [.gitignore](.gitignore).
 
 ## Current Status
 
-MemoryOS v0.1.0 is an actively used public beta. The command-line workflow and Markdown format are usable now; the Python API and note schema may still change before a stable 1.0 release. Bug reports, focused issues, and small pull requests are welcome.
+MemoryOS v0.2.0 is an actively used public beta. The command-line workflow and Markdown format are usable now; the Python API and note schema may still change before a stable 1.0 release. Bug reports and focused issues through GitHub Issues, plus small pull requests, are welcome.
 
 ## Development
 
 ```bash
-python3 -m unittest discover -s tests -v
-PYTHONPYCACHEPREFIX=/tmp/memoryos-pycache python3 -m py_compile memoryos/*.py
-python3 -m memoryos.cli doctor --home /tmp/memoryos-doctor
+python -m unittest discover -s tests -v
+PYTHONPYCACHEPREFIX=/tmp/memoryos-pycache python -m compileall memoryos
+python -m memoryos.cli doctor --home /tmp/memoryos-doctor
 ```
-
-## Troubleshooting
-
-For an old pip or an intentionally offline environment, use the included legacy setuptools fallback:
-
-```bash
-python -m pip install --no-use-pep517 -e .
-```
-
-v0.1.0 represents a working local engine rather than a long-term compatibility promise.

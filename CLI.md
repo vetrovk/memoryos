@@ -9,20 +9,10 @@ memory <command>
 It is available after local editable install:
 
 ```bash
-python3 -m pip install -e .
+python -m pip install -e .
 ```
 
-During local development you can also use:
-
-```bash
-python3 -m memoryos.cli <command>
-```
-
-or:
-
-```bash
-./memory <command>
-```
+Use the installed command from the active virtual environment. The repository-local wrapper scripts remain for backward compatibility, but are not the documented fallback for agent workflows.
 
 ## Commands
 
@@ -119,7 +109,7 @@ memory learn \
   --file memoryos/search.py \
   --error "Ambiguous SQL column name" \
   --decision "Qualify notes.type in joined search queries" \
-  --command-used "python3 -m memoryos.cli doctor" \
+  --command-used "memory doctor" \
   --finding "Doctor is green" \
   --recommendation "Add regression test later" \
   --actor codex \

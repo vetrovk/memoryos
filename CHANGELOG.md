@@ -2,6 +2,23 @@
 
 All notable public changes to MemoryOS are documented here.
 
+## [0.2.0] - 2026-07-23
+
+### Added
+
+- Bounded, read-only session context for coding-agent handoff with `memory context <project> --session`.
+- Post-save verification for permanent session learning, covering Markdown persistence, metadata, SQLite indexing, and normal search retrieval.
+- Focused test coverage for session context limits, stable ordering, verification failures, drafts, and CLI exit behavior.
+
+### Changed
+
+- Clarified public beta installation, launcher, pending fallback, and local-data guidance.
+- Extended installed-CLI smoke coverage in CI for session context, pending dry-run, and doctor checks.
+
+### Fixed
+
+- Removed the unused legacy database shim from the runtime configuration.
+
 ## [0.1.0] - 2026-07-18
 
 ### Added
