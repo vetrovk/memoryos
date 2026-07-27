@@ -2,6 +2,13 @@
 
 All notable public changes to MemoryOS are documented here.
 
+## [0.2.3] - 2026-07-27
+
+### Fixed
+
+- Read-only duplicate lookup errors no longer prevent session learning from reaching the pending fallback.
+- In a sandbox or readonly memory home, `memory learn --from-session` now creates `.memoryos_pending/*.json` and exits successfully when that fallback is saved.
+
 ## [0.2.2] - 2026-07-27
 
 ### Fixed
