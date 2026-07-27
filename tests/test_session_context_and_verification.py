@@ -190,6 +190,20 @@ class SessionVerificationTests(unittest.TestCase):
         self.assertEqual(report["archived"], 1)
         self.assertEqual(len(restored.search("Preserve session after readonly failure")), 1)
 
+    def test_readonly_duplicate_lookup_still_reaches_pending_fallback(self) -> None:
+        self._change("readonly-lookup.py")
+        with patch("memoryos.api.connect_read_only", side_effect=sqlite3.OperationalError("attempt to write a readonly database")):
+            with patch.object(self.memory, "learn", side_effect=sqlite3.OperationalError("attempt to write a readonly database")):
+                result = self.memory.learn_from_session(
+                    project="fixture",
+                    goal="Preserve session when duplicate lookup is readonly",
+                    cwd=self.root,
+                    test_results="passed",
+                )
+
+        self.assertEqual(result.disposition, "pending")
+        self.assertTrue(Path(result.path).is_file())
+
     def test_cli_treats_successful_pending_fallback_as_recoverable(self) -> None:
         self._change("fallback.py")
         output = StringIO()

@@ -2053,16 +2053,23 @@ class Memory:
         cutoff = (datetime.now() - timedelta(hours=int(config["near_duplicate_window_hours"]))).strftime("%Y-%m-%d %H:%M")
         if not database_path(self.home).exists():
             return "", "", ""
-        con = connect_read_only(self.home)
-        rows = con.execute(
-            """
-            SELECT id, path, title, project, content, created FROM notes
-            WHERE lower(project) = lower(?) AND type = 'session' AND created >= ?
-            ORDER BY created DESC LIMIT 25
-            """,
-            (learning.project, cutoff),
-        ).fetchall()
-        con.close()
+        try:
+            con = connect_read_only(self.home)
+            try:
+                rows = con.execute(
+                    """
+                    SELECT id, path, title, project, content, created FROM notes
+                    WHERE lower(project) = lower(?) AND type = 'session' AND created >= ?
+                    ORDER BY created DESC LIMIT 25
+                    """,
+                    (learning.project, cutoff),
+                ).fetchall()
+            finally:
+                con.close()
+        except (sqlite3.OperationalError, OSError) as exc:
+            if self._is_direct_write_unavailable(exc):
+                return "", "", ""
+            raise
         for row in rows:
             content = row["content"] or ""
             existing_files = self._extract_learning_bullets(content, "Changed Files")
