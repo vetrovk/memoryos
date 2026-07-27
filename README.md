@@ -4,11 +4,44 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Version](https://img.shields.io/github/v/tag/vetrovk/memoryos?label=version)](https://github.com/vetrovk/memoryos/tags)
 
-MemoryOS is a local-first engineering memory system built for OpenAI Codex, keeping decisions, task outcomes, and investigation context searchable after a project session ends.
+MemoryOS keeps useful engineering decisions, task outcomes, and investigation results in local Markdown notes that you can search later. It is built around OpenAI Codex workflows, but its CLI and Python API are usable on their own.
 
-It was created around daily Codex engineering workflows. It helps when Codex has already investigated a failure, reviewed a pull request, or rejected an OSS candidate, but the next task has to repeat that work because the useful conclusion was lost in a terminal, chat, or commit history.
+## Why use it?
 
-## Primary Target
+- Keep a resolved investigation from becoming the next task's repeated research.
+- Find a past decision, error, PR outcome, or handoff with one local search.
+- Read and back up your memory as ordinary Markdown, with SQLite FTS5 only as a local index.
+- Capture a Git session automatically when it has useful engineering signal.
+
+## Quick start
+
+Requires Python 3.9 or newer. Git is needed for session capture.
+
+```bash
+git clone https://github.com/vetrovk/memoryos.git
+cd memoryos
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install .
+
+memory init
+memory learn --project demo --goal "Record a deployment decision" --decision "Keep rollback steps in the runbook"
+memory search "deployment decision"
+```
+
+`memory init` creates an empty local memory at `~/Memory` by default. Set `MEMORY_HOME` before running it to use another location.
+
+For a real project, capture a completed session with:
+
+```bash
+memory learn --from-session --actor codex --source codex
+```
+
+Continue with the [examples](#examples), [CLI reference](CLI.md), [architecture](ARCHITECTURE.md), and [privacy notes](PRIVACY.md) below. The repository contains the engine only; keep your actual memory folder outside it.
+
+## More detail
+
+### Primary target
 
 - Built for OpenAI Codex.
 - Used daily in real engineering workflows with Codex.
@@ -16,21 +49,17 @@ It was created around daily Codex engineering workflows. It helps when Codex has
 
 MemoryOS is an independent open-source project. It is not made by, operated by, or affiliated with OpenAI. `OpenAI` and `Codex` are trademarks of OpenAI and are used here only to identify the external tool MemoryOS targets.
 
-![MemoryOS flow](docs/images/memory-flow.svg)
-
-## What It Does
+### What it does
 
 - Captures structured task learning through a Python API or `memory learn`.
-- Collects a local Git session with `memory learn --from-session`.
 - Curates session records into permanent notes, drafts, or skips when the signal is weak or duplicated.
 - Stores GitHub pull-request context and lifecycle updates in one durable note per PR.
 - Stores one structured OSS candidate decision per repository issue.
 - Imports local `.memoryos_pending/*.json` records from agent workflows.
-- Keeps Markdown as the source of truth and SQLite FTS5 as the local search index.
 
 No cloud service, external API, or LLM is required for the core workflow. GitHub PR capture optionally uses the locally configured `gh` CLI.
 
-## Agent Compatibility
+### Agent compatibility
 
 | Agent | Current status |
 | --- | --- |
@@ -40,7 +69,7 @@ No cloud service, external API, or LLM is required for the core workflow. GitHub
 | Gemini CLI | Not tested by this project. |
 | Other coding agents | Possible through the CLI or Python API, but not a primary focus. |
 
-## How It Works
+### How it works
 
 ```text
 OpenAI Codex
@@ -56,44 +85,7 @@ skip  draft  permanent Markdown note
 
 Permanent notes are human-readable Markdown. SQLite indexes notes, tags, links, aliases, commands, and history so the same memory is both inspectable and searchable.
 
-## Install
-
-Requirements: Python 3.9 or newer, plus Git for session capture. GitHub PR capture additionally needs the GitHub CLI `gh`.
-
-```bash
-git clone https://github.com/vetrovk/memoryos.git
-cd memoryos
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install -e .
-memory --help
-```
-
-The repository contains the engine only. Keep your actual memory folder outside the repository.
-
-## Quick Start
-
-This creates a disposable local memory, saves one engineering conclusion, and finds it again.
-
-```bash
-export MEMORY_HOME="$PWD/.memory-demo"
-memory init
-
-memory learn \
-  --project demo \
-  --goal "Record the release checklist" \
-  --action "Created a local MemoryOS demo" \
-  --decision "Keep durable notes as Markdown" \
-  --finding "SQLite FTS5 returns the saved conclusion" \
-  --actor developer \
-  --source manual
-
-memory search "release checklist"
-```
-
-`memory init` creates an empty local memory home: folders and a SQLite index, but no example notes or user records. The first `memory learn` above creates Markdown under `$MEMORY_HOME` and updates its SQLite index immediately. Remove `.memory-demo/` when you no longer need the example.
-
-For a standalone note-format reference, see [examples/example-decision.md](examples/example-decision.md). It stays in the repository and is never copied into your memory home.
+![MemoryOS flow](docs/images/memory-flow.svg)
 
 To preview automatic session capture without saving a note:
 
