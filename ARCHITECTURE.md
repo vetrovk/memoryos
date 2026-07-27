@@ -101,6 +101,8 @@ Core methods:
 
 After `learn_from_session()` saves a permanent note, MemoryOS verifies the file, frontmatter metadata, indexed row, and normal FTS retrieval before returning a permanent success result. Verification failure leaves the note intact and reports the failed checks. Drafts receive file/metadata verification only because they are intentionally outside the permanent search index.
 
+Session collection reads the duplicate index through a SQLite read-only connection. If a later direct write fails with a readonly-database error, `learn_from_session()` writes the same session as a Codex Work JSON record in the current project's `.memoryos_pending/` directory. The fallback is local, explicit in CLI output, and imported later through the normal pending importer.
+
 ## Storage and Extension Boundaries
 
 The current release stores durable notes as Markdown files on the local filesystem and maintains SQLite as a derived index. It ships with one experimental extension boundary: `BasePlugin` and `FilesystemPlugin`, a small wrapper around `memory.import_path()`.

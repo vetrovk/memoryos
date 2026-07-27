@@ -110,7 +110,7 @@ memory context memoryos --session --limit 8 --max-bytes 4096
 
 Session context is opt-in. It uses existing project memory only, writes nothing, starts no hooks or background process, and reports its actual UTF-8 size and truncation state. After a permanent `memory learn --from-session` save, MemoryOS verifies the Markdown file, metadata, SQLite index, and normal search retrieval before reporting success.
 
-If an agent cannot write the configured memory home because of a readonly database or sandbox boundary, the Codex workflow can leave a Codex Work JSON record in `.memoryos_pending/` inside the project. Import it later with `memory import-pending`; successful files are archived beside their source. MemoryOS does not send this data to a cloud service.
+If `memory learn --from-session` cannot write the configured memory home because of a readonly database or sandbox boundary, it automatically saves a Codex Work JSON record in `.memoryos_pending/` inside the current project and prints its path. Import it later with `memory import-pending --path <project-root>`; successful files are archived beside their source. MemoryOS does not send this data to a cloud service.
 
 ## Examples
 

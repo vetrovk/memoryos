@@ -291,7 +291,7 @@ class Memory:
         if not isinstance(payload, dict):
             raise ValueError("pending JSON must contain an object")
         if payload.get("schema_version") != 1:
-            raise ValueError("unsupported pending schema_version")
+            return self._learning_from_legacy_pending_payload(payload, path, roots)
         task = str(payload.get("task") or "").strip()
         if not task:
             raise ValueError("pending JSON requires a non-empty task")
@@ -330,6 +330,42 @@ class Memory:
         learning.quality_score, _ = self.score_learning(learning)
         return learning
 
+    def _learning_from_legacy_pending_payload(self, payload: dict[str, object], path: Path, roots: list[Path]) -> TaskLearningInput:
+        """Adapt the two pre-schema Codex Work v1 envelopes without guessing unknown formats."""
+        is_format_v1 = payload.get("format") == "codex-work" and payload.get("version") == 1
+        is_schema_v1 = payload.get("schema") == "codex-work" and payload.get("version") == 1
+        if not (is_format_v1 or is_schema_v1):
+            raise ValueError("unsupported pending schema_version")
+        summary = str(payload.get("summary") or "").strip()
+        title = str(payload.get("title") or "").strip()
+        task = title or summary
+        if not task:
+            raise ValueError("legacy pending JSON requires title or summary")
+        project = str(payload.get("project") or "").strip() or self._pending_project_from_path(path, roots) or "codex-work"
+        findings = [summary] if summary else []
+        outcome_detail = str(payload.get("outcome") or "").strip()
+        if outcome_detail:
+            findings.append(f"Outcome details: {outcome_detail}")
+        findings.extend(self._pending_strings(payload.get("verification")))
+        findings.extend(self._pending_strings(payload.get("sources"), keys=("url", "uri", "path", "name", "title")))
+        artifacts = self._pending_strings(payload.get("artifacts"), keys=("path", "file", "name", "uri"))
+        learning = TaskLearningInput(
+            project=project,
+            goal=task,
+            actions=["Imported from legacy Codex Work pending record."],
+            changed_files=artifacts,
+            findings=findings,
+            tags=["pending-import", "codex-work", "legacy-pending", project],
+            source=str(payload.get("source") or "codex"),
+            actor=str(payload.get("actor") or "codex"),
+            status="completed",
+            outcome="completed",
+            raw_changed_files_count=len(artifacts),
+            useful_changed_files_count=len(artifacts),
+        )
+        learning.quality_score, _ = self.score_learning(learning)
+        return learning
+
     @staticmethod
     def _pending_strings(value: object, keys: tuple[str, ...] = ()) -> list[str]:
         values = value if isinstance(value, list) else ([] if value is None else [value])
@@ -348,6 +384,51 @@ class Memory:
         if project_dir in roots:
             return ""
         return project_dir.name
+
+    def _save_session_pending_fallback(self, preview: SessionLearningPreview, exc: BaseException) -> LearningSaveResult:
+        """Keep a session capture in the worktree when the local index is read-only."""
+        root = Path(preview.git_root or preview.cwd).expanduser().resolve()
+        pending_dir = root / ".memoryos_pending"
+        path = pending_dir / f"{datetime.now().strftime('%Y%m%dT%H%M%S')}-{uuid_text()[:8]}-codex.json"
+        learning = preview.learning
+        payload = {
+            "schema_version": 1,
+            "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+            "actor": learning.actor,
+            "source": learning.source,
+            "project": learning.project,
+            "task": learning.goal,
+            "skill": learning.project,
+            "status": learning.status,
+            "outcome": {
+                "outcome": learning.outcome,
+                "status": learning.status,
+                "quality_score": learning.quality_score,
+                "curator_reason": preview.reason,
+            },
+            "artifacts": learning.changed_files,
+            "learning": [*learning.findings, *learning.errors, *learning.decisions, *learning.recommendations],
+            "memoryos_error": f"Direct MemoryOS write unavailable: {exc}",
+        }
+        try:
+            pending_dir.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        except OSError as fallback_exc:
+            return LearningSaveResult(
+                "fallback_failed",
+                "direct MemoryOS write unavailable and pending fallback failed: "
+                f"{fallback_exc}",
+                quality_score=learning.quality_score,
+                reason=str(exc),
+            )
+        return LearningSaveResult(
+            "pending",
+            "direct MemoryOS write unavailable; saved pending session: "
+            f"{path}\nimport later: memory import-pending --path {root}",
+            str(path),
+            learning.quality_score,
+            str(exc),
+        )
 
     def learn_from_session(
         self,
@@ -376,30 +457,39 @@ class Memory:
         if dry_run:
             return preview
         if preview.disposition == "skip":
-            event = self._curator_event_for_skip(preview)
-            self._record_curator_event(event, preview.learning, preview.reason, preview.related_note_id, preview.related_note_path)
+            try:
+                event = self._curator_event_for_skip(preview)
+                self._record_curator_event(event, preview.learning, preview.reason, preview.related_note_id, preview.related_note_path)
+            except (sqlite3.OperationalError, OSError) as exc:
+                if not self._is_direct_write_unavailable(exc):
+                    raise
             return LearningSaveResult("skipped", f"skipped: {preview.reason}", quality_score=preview.learning.quality_score, reason=preview.reason)
-        if preview.disposition == "draft" and draft:
-            path = self.save_draft(preview.learning, reason=preview.reason)
-            self._record_curator_event("curator_saved_draft", preview.learning, preview.reason, path=str(path))
-            verification = self._verify_session_save(path, preview.learning, draft=True)
+        try:
+            if preview.disposition == "draft" and draft:
+                path = self.save_draft(preview.learning, reason=preview.reason)
+                self._record_curator_event("curator_saved_draft", preview.learning, preview.reason, path=str(path))
+                verification = self._verify_session_save(path, preview.learning, draft=True)
+                if not verification["ok"]:
+                    return self._verification_failure(path, preview.learning, verification)
+                return LearningSaveResult("draft", f"saved as draft: {path}\nverified: yes", str(path), preview.learning.quality_score, preview.reason, verification)
+            path = self.learn(preview.learning)
+            note_id = self._note_id_for_path(path)
+            self._record_curator_event("curator_saved_permanent", preview.learning, preview.reason, note_id, str(path))
+            verification = self._verify_session_save(path, preview.learning)
             if not verification["ok"]:
                 return self._verification_failure(path, preview.learning, verification)
-            return LearningSaveResult("draft", f"saved as draft: {path}\nverified: yes", str(path), preview.learning.quality_score, preview.reason, verification)
-        path = self.learn(preview.learning)
-        note_id = self._note_id_for_path(path)
-        self._record_curator_event("curator_saved_permanent", preview.learning, preview.reason, note_id, str(path))
-        verification = self._verify_session_save(path, preview.learning)
-        if not verification["ok"]:
-            return self._verification_failure(path, preview.learning, verification)
-        return LearningSaveResult(
-            "permanent",
-            f"saved to permanent memory: {path}\nindexed: yes\nsearchable: yes\nverified: yes",
-            str(path),
-            preview.learning.quality_score,
-            preview.reason,
-            verification,
-        )
+            return LearningSaveResult(
+                "permanent",
+                f"saved to permanent memory: {path}\nindexed: yes\nsearchable: yes\nverified: yes",
+                str(path),
+                preview.learning.quality_score,
+                preview.reason,
+                verification,
+            )
+        except (sqlite3.OperationalError, OSError) as exc:
+            if not self._is_direct_write_unavailable(exc):
+                raise
+            return self._save_session_pending_fallback(preview, exc)
 
     def collect_session_learning(
         self,
@@ -571,11 +661,7 @@ class Memory:
             "curator_fingerprint": learning.curator_fingerprint,
         }
         body = self._render_learning_body(learning)
-        path = draft_dir / f"{date_stamp()}-{slugify(learning.goal)}.md"
-        counter = 2
-        while path.exists():
-            path = draft_dir / f"{date_stamp()}-{slugify(learning.goal)}-{counter}.md"
-            counter += 1
+        path = self._unique_path(draft_dir, learning.goal)
         path.write_text(build_markdown(meta, body), encoding="utf-8")
         return path
 
@@ -1447,7 +1533,15 @@ class Memory:
 
     def doctor(self) -> tuple[bool, str]:
         problems = 0
-        lines = [f"# MemoryOS doctor: {self.home}", "", "## Folders"]
+        lines = [
+            f"# MemoryOS doctor: {self.home}",
+            "",
+            "## Paths",
+            f"Memory home: {self.home}",
+            f"SQLite index: {database_path(self.home)}",
+            "",
+            "## Folders",
+        ]
         from .config import FOLDERS
 
         for folder in FOLDERS:
@@ -1465,9 +1559,12 @@ class Memory:
             for table, count in self.stats().items():
                 lines.append(f"OK {table}: {count}")
             con.close()
-        except sqlite3.Error as exc:
+        except (sqlite3.Error, OSError) as exc:
             problems += 1
             lines.append(f"ERROR database: {exc}")
+            if self._is_direct_write_unavailable(exc):
+                lines.append("DIRECT_WRITE_UNAVAILABLE: SQLite cannot write from this process.")
+                lines.append("FALLBACK: run memory learn --from-session from a writable project; it saves .memoryos_pending/*.json automatically.")
         titles: dict[str, list[Path]] = {}
         broken = 0
         for path in self.markdown_files():
@@ -1954,7 +2051,9 @@ class Memory:
         goal_key = re.sub(r"\d+", "N", learning.goal.lower())
         config = load_curator_config(self.home)
         cutoff = (datetime.now() - timedelta(hours=int(config["near_duplicate_window_hours"]))).strftime("%Y-%m-%d %H:%M")
-        con = self.connect()
+        if not database_path(self.home).exists():
+            return "", "", ""
+        con = connect_read_only(self.home)
         rows = con.execute(
             """
             SELECT id, path, title, project, content, created FROM notes
@@ -1982,6 +2081,11 @@ class Memory:
             if goal_key and goal_key == existing_goal_key and not learning.changed_files:
                 return f"duplicate: similar goal for project as {row['created']}", row["id"], row_path
         return "", "", ""
+
+    @staticmethod
+    def _is_direct_write_unavailable(exc: BaseException) -> bool:
+        message = str(exc).lower()
+        return isinstance(exc, PermissionError) or "readonly database" in message or "attempt to write" in message or "operation not permitted" in message
 
     def _jaccard_similarity(self, left: set[str], right: set[str]) -> float:
         if not left and not right:
@@ -2130,7 +2234,10 @@ class Memory:
         }
 
     def _unique_path(self, folder: Path, title: str) -> Path:
-        base = f"{date_stamp()}-{slugify(title)}"
+        slug = slugify(title)
+        while len(slug.encode("utf-8")) > 200:
+            slug = slug[:-1]
+        base = f"{date_stamp()}-{slug}"
         path = folder / f"{base}.md"
         counter = 2
         while path.exists():

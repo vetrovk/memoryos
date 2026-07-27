@@ -233,7 +233,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(memory.render_session_preview(result))
             else:
                 print(result.message)
-            return 1 if result.disposition == "verification_failed" else 0
+            return 1 if result.disposition in {"verification_failed", "fallback_failed"} else 0
         payload = _learning_payload(args)
         allowed = {field.name for field in fields(TaskLearningInput)}
         path = memory.learn(TaskLearningInput(**{key: value for key, value in payload.items() if key in allowed}))

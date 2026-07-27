@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import sqlite3
 import subprocess
 import tempfile
 import unittest
@@ -162,6 +164,79 @@ class SessionVerificationTests(unittest.TestCase):
 
         self.assertEqual(result.disposition, "skipped")
         self.assertEqual(result.verification, {})
+
+    def test_readonly_session_save_uses_project_pending_fallback(self) -> None:
+        self._change()
+        with patch.object(self.memory, "learn", side_effect=sqlite3.OperationalError("attempt to write a readonly database")):
+            result = self.memory.learn_from_session(
+                project="fixture",
+                goal="Preserve session after readonly failure",
+                cwd=self.root,
+                test_results="passed",
+            )
+
+        pending = Path(result.path)
+        self.assertEqual(result.disposition, "pending")
+        self.assertTrue(pending.is_file())
+        self.assertEqual(pending.parent, (self.root / ".memoryos_pending").resolve())
+        payload = json.loads(pending.read_text(encoding="utf-8"))
+        self.assertEqual(payload["schema_version"], 1)
+        self.assertEqual(payload["task"], "Preserve session after readonly failure")
+        self.assertIn("readonly database", payload["memoryos_error"])
+
+        restored = Memory(Path(self.temp.name) / "restored-memory")
+        report = restored.import_pending(paths=[self.root])
+        self.assertEqual(report["imported"], 1)
+        self.assertEqual(report["archived"], 1)
+        self.assertEqual(len(restored.search("Preserve session after readonly failure")), 1)
+
+    def test_cli_treats_successful_pending_fallback_as_recoverable(self) -> None:
+        self._change("fallback.py")
+        output = StringIO()
+        with patch.object(Memory, "learn", side_effect=sqlite3.OperationalError("attempt to write a readonly database")):
+            with redirect_stdout(output):
+                code = main(
+                    [
+                        "--home",
+                        str(self.memory.home),
+                        "learn",
+                        "--from-session",
+                        "--project",
+                        "fixture",
+                        "--goal",
+                        "CLI pending fallback",
+                        "--cwd",
+                        str(self.root),
+                        "--test-results",
+                        "passed",
+                    ]
+                )
+
+        self.assertEqual(code, 0)
+        self.assertIn("saved pending session", output.getvalue())
+        self.assertEqual(len(list((self.root / ".memoryos_pending").glob("*.json"))), 1)
+
+    def test_permission_error_uses_the_same_pending_fallback(self) -> None:
+        self._change("sandbox.py")
+        with patch.object(self.memory, "learn", side_effect=PermissionError(1, "Operation not permitted")):
+            result = self.memory.learn_from_session(
+                project="fixture",
+                goal="Preserve session after sandbox refusal",
+                cwd=self.root,
+                test_results="passed",
+            )
+
+        self.assertEqual(result.disposition, "pending")
+        self.assertTrue(Path(result.path).is_file())
+
+    def test_doctor_explains_readonly_database_fallback(self) -> None:
+        with patch.object(self.memory, "connect", side_effect=sqlite3.OperationalError("attempt to write a readonly database")):
+            ok, report = self.memory.doctor()
+
+        self.assertFalse(ok)
+        self.assertIn(f"SQLite index: {database_path(self.memory.home)}", report)
+        self.assertIn("DIRECT_WRITE_UNAVAILABLE", report)
+        self.assertIn(".memoryos_pending", report)
 
     def test_missing_index_row_and_missing_file_fail_verification(self) -> None:
         learning = TaskLearningInput(project="fixture", goal="Unique retrieval marker", findings=["Useful finding."])

@@ -10,6 +10,7 @@ from memoryos import Memory
 from memoryos.cli import main
 from memoryos.config import FOLDERS, database_path
 from memoryos.models import NoteInput
+from memoryos.util import read_markdown
 
 
 class InitTests(unittest.TestCase):
@@ -55,6 +56,16 @@ class InitTests(unittest.TestCase):
         self.assertEqual(report["created_examples"], 0)
         self.assertEqual(note.read_bytes(), before)
         self.assertEqual(len(self.memory.search("Keep my decision")), 1)
+
+    def test_long_unicode_title_keeps_metadata_and_uses_a_safe_filename(self) -> None:
+        self.memory.init()
+        title = "Подтверждённый результат " * 40
+
+        path = self.memory.add(NoteInput(title=title, type="decision", text="Long titles remain searchable."))
+
+        meta, _ = read_markdown(path)
+        self.assertEqual(meta["title"], title)
+        self.assertLessEqual(len(path.name.encode("utf-8")), 240)
 
     def test_legacy_seeded_note_remains_after_init(self) -> None:
         self.memory.init()

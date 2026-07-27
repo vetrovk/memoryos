@@ -68,6 +68,55 @@ class PendingImportTests(unittest.TestCase):
         self.assertFalse(good.exists())
         self.assertEqual(len(self.memory.search("broken JSON")), 1)
 
+    def test_legacy_codex_work_v1_envelopes_are_imported(self) -> None:
+        (self.pending / "format-v1.json").write_text(
+            json.dumps(
+                {
+                    "format": "codex-work",
+                    "version": 1,
+                    "actor": "codex",
+                    "source": "codex",
+                    "title": "Legacy title",
+                    "summary": "Legacy summary",
+                    "artifacts": ["memoryos/api.py"],
+                    "verification": ["Tests passed"],
+                }
+            ),
+            encoding="utf-8",
+        )
+        (self.pending / "schema-v1.json").write_text(
+            json.dumps(
+                {
+                    "schema": "codex-work",
+                    "version": 1,
+                    "actor": "codex",
+                    "source": "codex",
+                    "summary": "Legacy schema summary",
+                    "outcome": "Completed investigation",
+                    "sources": [{"url": "https://example.invalid/source"}],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        report = self.memory.import_pending(paths=[self.root])
+
+        self.assertEqual(report["imported"], 2)
+        self.assertEqual(report["errors"], 0)
+        self.assertTrue(any(result.title.endswith("Legacy title") for result in self.memory.search("Legacy title")))
+        self.assertTrue(any("Legacy schema summary" in result.snippet for result in self.memory.search("Legacy schema summary")))
+        self.assertTrue((self.pending / "archive" / "format-v1.json").exists())
+        self.assertTrue((self.pending / "archive" / "schema-v1.json").exists())
+
+    def test_unknown_pending_schema_remains_unimported(self) -> None:
+        source = self.pending / "unknown.json"
+        source.write_text(json.dumps({"schema_version": 2, "task": "Do not import"}), encoding="utf-8")
+
+        report = self.memory.import_pending(paths=[self.root])
+
+        self.assertEqual(report["errors"], 1)
+        self.assertTrue(source.exists())
+
     def _write_pending(self, name: str, task: str) -> Path:
         path = self.pending / name
         payload = {

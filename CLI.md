@@ -85,6 +85,8 @@ memory learn --from-session --actor codex --source codex --dry-run
 
 After a permanent `--from-session` save, MemoryOS verifies the Markdown file, required metadata, SQLite index, and retrieval through the normal FTS search path. A verification failure leaves the note untouched, exits non-zero, and suggests `memory doctor` or `memory rebuild` when the index is the failed check. Drafts are verified as files and metadata only; Curator skips remain successful skips.
 
+If the current process cannot write the local SQLite index because of a readonly database or sandbox boundary, `--from-session` writes a recoverable Codex Work JSON record to `.memoryos_pending/` in the current project instead of showing a traceback. The command prints the exact path and an import command. A successful pending fallback exits with `0`; if the fallback file cannot be written, the command exits non-zero.
+
 ### Bounded session context
 
 ```bash
@@ -151,6 +153,8 @@ memory import-pending --path "/path/to/projects"
 ```
 
 `--dry-run` does not save notes or move files. A successful import verifies the SQLite note, then moves the source to `.memoryos_pending/archive/`. Failed files remain in place and are recorded in `memory.log`; one bad JSON file does not stop the batch. The local SHA-256 state file prevents re-importing a copied or retried record.
+
+`memory doctor` performs a small SQLite write-and-rollback check. When direct writing is unavailable, it reports `DIRECT_WRITE_UNAVAILABLE` and points to the session pending fallback instead of treating the failure as an unexplained database problem.
 
 For a daily macOS job, copy and fill the placeholders in `launchd/com.memoryos.import-pending.plist.example`; do not load it until you explicitly want scheduling enabled.
 

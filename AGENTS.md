@@ -47,4 +47,6 @@ In the final response, briefly state that MemoryOS was updated. If the learn com
 
 If MemoryOS reports `saved as draft` or `skipped`, mention that honestly when it matters. This is expected Memory Curator behavior, not a hidden failure.
 
+If `memory learn --from-session` reports `saved pending session`, direct SQLite writing is unavailable in the current process. Treat the pending JSON path printed by the command as the durable result. Do not retry with the system Python or another launcher. Import it later from a writable environment with `memory import-pending --path <project-root>`.
+
 Generated files are activity noise, not engineering memory. Do not try to force dependency, build, cache, or generated snapshots into permanent memory before the final workflow.
