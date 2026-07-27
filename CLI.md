@@ -85,7 +85,7 @@ memory learn --from-session --actor codex --source codex --dry-run
 
 After a permanent `--from-session` save, MemoryOS verifies the Markdown file, required metadata, SQLite index, and retrieval through the normal FTS search path. A verification failure leaves the note untouched, exits non-zero, and suggests `memory doctor` or `memory rebuild` when the index is the failed check. Drafts are verified as files and metadata only; Curator skips remain successful skips.
 
-If the current process cannot write the local SQLite index because of a readonly database or sandbox boundary, `--from-session` writes a recoverable Codex Work JSON record to `.memoryos_pending/` in the current project instead of showing a traceback. The command prints the exact path and an import command. A successful pending fallback exits with `0`; if the fallback file cannot be written, the command exits non-zero.
+If the current process cannot write the local SQLite index because of a readonly database or sandbox boundary, `--from-session` writes a recoverable Codex Work JSON record to `.memoryos_pending/` in the current project instead of showing a traceback. The command prints the exact path and an import command. A successful pending fallback exits with `0`, meaning the queue file was saved rather than that the main memory home was written. Keep the JSON until `memory import-pending --path <project-root>` reports success; if the fallback file cannot be written, the command exits non-zero.
 
 ### Bounded session context
 

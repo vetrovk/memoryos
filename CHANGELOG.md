@@ -2,6 +2,16 @@
 
 All notable public changes to MemoryOS are documented here.
 
+## [0.2.2] - 2026-07-27
+
+### Fixed
+
+- Session learning now preserves a Codex Work pending record when a sandbox or read-only memory home blocks direct writes.
+- Pending fallback reports its saved path instead of exposing a SQLite traceback, and successful fallback exits with status `0`.
+- Pending import accepts confirmed legacy Codex Work v1 payload envelopes and keeps SHA-256 markers to prevent re-importing identical records.
+- Long Unicode session titles no longer cause invalid generated note or pending filenames.
+- `memory doctor` now reports resolved storage paths and explains unavailable direct writes.
+
 ## [0.2.1] - 2026-07-23
 
 ### Added
