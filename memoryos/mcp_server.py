@@ -49,7 +49,10 @@ class MemoryMCPService:
         if project:
             return project
         if cwd:
-            return self.memory.project_from_cwd(cwd)[1]
+            try:
+                return self.memory.project_from_cwd(cwd)[1]
+            except ValueError as exc:
+                raise ValueError("Project could not be determined from cwd") from exc
         raise ValueError("Provide project or cwd")
 
     @staticmethod

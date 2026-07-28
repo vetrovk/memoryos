@@ -39,6 +39,13 @@ class MCPServerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "not found"):
             self.service.open_memory("not-a-note")
 
+    def test_invalid_cwd_does_not_disclose_a_local_path(self) -> None:
+        private_cwd = "/private/work/secret-project"
+        with self.assertRaises(ValueError) as exc:
+            self.service.search_memory("topic", cwd=private_cwd)
+        self.assertEqual(str(exc.exception), "Project could not be determined from cwd")
+        self.assertNotIn(private_cwd, str(exc.exception))
+
     def test_open_and_context_are_bounded_and_read_only(self) -> None:
         before = list((self.home / "_system" / "events").glob("*.jsonl")) if (self.home / "_system" / "events").exists() else []
         note = self.service.open_memory(self.note_id, max_bytes=512)
