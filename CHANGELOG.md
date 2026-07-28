@@ -2,6 +2,14 @@
 
 All notable public changes to MemoryOS are documented here.
 
+## [0.5.1] - 2026-07-28
+
+### Security
+
+- Permanent notes, drafts, pending session learning, pending imports, and structured note upserts now reject high-confidence credential formats before writing.
+- Safe errors and local learning telemetry report only the credential category, never the detected value.
+- Intentional local storage requires the explicit `--allow-credentials` override; existing notes are not scanned or rewritten automatically.
+
 ## [0.5.0] - 2026-07-28
 
 ### Added

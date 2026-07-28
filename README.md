@@ -135,6 +135,8 @@ Session context is opt-in. It uses existing project memory only, writes nothing,
 
 If `memory learn --from-session` cannot write the configured memory home because of a readonly database or sandbox boundary, it automatically saves a Codex Work JSON record in `.memoryos_pending/` inside the current project and prints its path. A successful fallback means the pending payload was saved, not that the sandbox wrote directly to the main memory home. Keep the JSON in place until `memory import-pending --path <project-root>` reports success; imported files are archived beside their source. MemoryOS does not send this data to a cloud service.
 
+Before creating a permanent note, draft, or pending learning record, MemoryOS blocks high-confidence credential formats such as private keys, provider tokens, AWS access keys, and explicit secret assignments. The error identifies only the credential category. If storing such text locally is intentional, repeat the writing command with `--allow-credentials`. Existing notes are not scanned or changed automatically.
+
 ### Local usage statistics
 
 MemoryOS records small local usage events in `<memory-home>/_system/events/events-YYYY-MM.jsonl` by default. With the default home, that is `~/Memory/_system/events/`. They include command type, project, normalized query, result count, note IDs and titles returned or opened, learning disposition, and durations. They never include note bodies, prompts, agent answers, credentials, or network transmission.
@@ -238,6 +240,7 @@ MemoryOS stores decisions and outcomes rather than a raw conversation history. M
 ## Privacy
 
 - Core data stays on the local filesystem selected by `MEMORY_HOME`, or `~/Memory` by default.
+- High-confidence credentials are blocked on new writes by default. MemoryOS does not use a general high-entropy heuristic.
 - Do not commit a real memory folder, SQLite database, logs, exports, drafts, pending records, or `.env` files.
 - The optional `memory github-pr` command calls your local `gh` CLI. It does not send local MemoryOS notes to GitHub.
 
@@ -259,7 +262,7 @@ MemoryOS has no bulk-delete command. Archive or remove local Markdown notes with
 
 ## Current Status
 
-MemoryOS v0.4.0 is an actively used public beta. The command-line workflow and Markdown format are usable now; the Python API and note schema may still change before a stable 1.0 release. Bug reports and focused issues through GitHub Issues, plus small pull requests, are welcome.
+MemoryOS v0.5.1 is an actively used public beta. The command-line workflow and Markdown format are usable now; the Python API and note schema may still change before a stable 1.0 release. Bug reports and focused issues through GitHub Issues, plus small pull requests, are welcome.
 
 ## Development
 

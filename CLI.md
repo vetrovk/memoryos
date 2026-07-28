@@ -1,6 +1,6 @@
 # MemoryOS CLI
 
-This reference matches MemoryOS v0.4.0 Public Beta.
+This reference matches MemoryOS v0.5.1 Public Beta.
 
 Primary command:
 
@@ -197,6 +197,19 @@ memory learn --from-json task-learning.json
 
 `--from-json -` reads JSON from stdin.
 
+### Credential guard
+
+Commands that create permanent notes, drafts, pending learning, or structured upserts block high-confidence credentials before writing. Supported categories are private keys, GitHub tokens, OpenAI-style API keys, AWS access keys, and explicit values assigned to `password`, `api_key`, `access_token`, or `secret`. Errors contain the category but not the detected value. MemoryOS does not apply a general high-entropy heuristic.
+
+For an intentional local save, add the explicit override to the writing command:
+
+```bash
+memory learn --project local --goal "Document a local fixture" --finding "api_key=local-fixture-value" --allow-credentials
+memory import-pending --path "/path/to/projects" --allow-credentials
+```
+
+The same flag is available for `memory add`, `memory import`, `memory github-pr`, `memory learn --from-github-pr`, `memory oss-candidate upsert`, and `memory drafts promote`. Existing notes are not scanned or rewritten automatically.
+
 ## `memory rebuild`
 
 Rebuild refreshes the derived SQLite index from eligible Markdown notes. It does not delete Markdown files or rewrite their frontmatter. The command prints `scanned`, `indexed`, `skipped`, and `failed` counts. It exits with `0` only when every eligible note was indexed; a partial index exits non-zero and lists each failed path with a short safe reason. Rebuild remains non-atomic in this beta: successfully indexed notes stay searchable, while failed notes remain in Markdown and should be inspected before retrying.
@@ -213,7 +226,7 @@ memory import-pending --dry-run --path "/path/to/projects"
 memory import-pending --path "/path/to/projects"
 ```
 
-`--dry-run` does not save notes or move files. A successful import verifies the SQLite note, then moves the source to `.memoryos_pending/archive/`. Failed files remain in place and are recorded in `memory.log`; one bad JSON file does not stop the batch. The local SHA-256 state file prevents re-importing a copied or retried record.
+`--dry-run` does not save notes or move files. A successful import verifies the SQLite note, then moves the source to `.memoryos_pending/archive/`. Files blocked by the credential guard remain in place and are reported as skipped without writing the detected value to logs or telemetry. Other failed files remain in place and are recorded in `memory.log`; one bad JSON file does not stop the batch. The local SHA-256 state file prevents re-importing a copied or retried record.
 
 `memory doctor` performs a small SQLite write-and-rollback check. When direct writing is unavailable, it reports `DIRECT_WRITE_UNAVAILABLE` and points to the session pending fallback instead of treating the failure as an unexplained database problem.
 

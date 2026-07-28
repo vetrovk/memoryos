@@ -256,7 +256,20 @@ class Memory:
         title = f"Task learned: {learning.goal}"
         tags = split_tags(["task-learning", "agent-learning", *learning.tags])
         body = self._render_learning_body(learning)
-        guard_credentials([title, body], allow_credentials=allow_credentials)
+        try:
+            guard_credentials([title, body], allow_credentials=allow_credentials)
+        except CredentialDetectedError:
+            if telemetry:
+                self._telemetry_event(
+                    "learning_skipped",
+                    project=learning.project,
+                    actor=learning.actor,
+                    source=learning.source,
+                    outcome=learning.outcome,
+                    reason="credential_detected",
+                    duration_ms=self._duration_ms(started),
+                )
+            raise
         path = self.add(
             NoteInput(
                 title=title,
@@ -369,13 +382,13 @@ class Memory:
                     continue
                 payload = json.loads(path.read_text(encoding="utf-8"))
                 learning = self._learning_from_pending_payload(payload, path, roots)
+                item["project"] = learning.project
                 guard_credentials(
                     [learning.goal, self._render_learning_body(learning)],
                     allow_credentials=allow_credentials,
                 )
                 if dry_run:
                     item["status"] = "would_import"
-                    item["project"] = learning.project
                     continue
                 note_path = self.learn(learning, allow_credentials=allow_credentials)
                 note_id = self._note_id_for_path(note_path)

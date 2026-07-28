@@ -12,6 +12,14 @@ Pending records are JSON files in `.memoryos_pending/*.json`. They can contain t
 
 Use `memory import-pending --path /path/to/projects` to restrict the search to a known project root. `--dry-run` reports matching candidates without importing, moving, or deleting them.
 
+## Credential Guard
+
+Before writing a permanent note, session draft, session pending record, pending import, GitHub PR memory, or OSS candidate, MemoryOS checks for a small set of high-confidence formats: private-key headers, GitHub tokens, OpenAI-style API keys, AWS access keys, and explicit values assigned to `password`, `api_key`, `access_token`, or `secret`.
+
+Detected values are not included in the CLI reason, local telemetry, or error log. A detector failure blocks the write. There is no general high-entropy heuristic in this release. Common placeholders such as `<value>` and `${TOKEN}` are allowed.
+
+Use `--allow-credentials` only when the local save is deliberate and you accept responsibility for protecting the memory home and its backups. The guard applies to new or explicitly updated records; it does not scan, rewrite, or delete existing notes automatically.
+
 ## Local Data Responsibilities
 
 - Do not commit a real memory folder, SQLite database, logs, exports, drafts, pending records, or `.env` files to a public repository.

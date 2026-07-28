@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .config import events_path
+from .credentials import detect_credential
 
 
 SENSITIVE_QUERY_PATTERNS = (
@@ -36,7 +37,10 @@ def record_event(home: Path, event_type: str, payload: dict[str, Any] | None = N
     if not telemetry_enabled():
         return
     event = {"timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds"), "event": event_type}
-    event.update(payload or {})
+    try:
+        event.update(_sanitize_event_value(payload or {}))
+    except Exception:
+        return
     encoded = (json.dumps(event, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
     try:
         path = events_path(home)
@@ -48,6 +52,16 @@ def record_event(home: Path, event_type: str, payload: dict[str, Any] | None = N
             os.close(fd)
     except OSError:
         return
+
+
+def _sanitize_event_value(value: Any) -> Any:
+    if isinstance(value, str):
+        return "[redacted]" if detect_credential(value) else value
+    if isinstance(value, dict):
+        return {key: _sanitize_event_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_event_value(item) for item in value]
+    return value
 
 
 def iter_events(home: Path) -> Iterable[dict[str, Any]]:

@@ -193,20 +193,25 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if report.failed == 0 else 1
     if args.command == "add":
         note_type = "health_note" if args.type == "health" else args.type
-        path = memory.add(
-            NoteInput(
-                title=args.title,
-                type=note_type,
-                project=args.project,
-                status=args.status,
-                tags=split_tags(args.tags),
-                text=args.text,
-                source=args.source,
-                parent=args.parent,
-                related=split_tags(args.related),
-                aliases=split_tags(args.aliases),
+        try:
+            path = memory.add(
+                NoteInput(
+                    title=args.title,
+                    type=note_type,
+                    project=args.project,
+                    status=args.status,
+                    tags=split_tags(args.tags),
+                    text=args.text,
+                    source=args.source,
+                    parent=args.parent,
+                    related=split_tags(args.related),
+                    aliases=split_tags(args.aliases),
+                ),
+                allow_credentials=args.allow_credentials,
             )
-        )
+        except CredentialDetectedError as exc:
+            print(str(exc))
+            return 1
         print(f"Added: {path}")
         return 0
     if args.command == "open":
@@ -258,11 +263,25 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Exported: {result}")
         return 0
     if args.command == "import":
-        print(f"Imported files: {memory.import_repo(Path(args.path), project=args.project)}")
+        try:
+            imported = memory.import_repo(
+                Path(args.path),
+                project=args.project,
+                allow_credentials=args.allow_credentials,
+            )
+        except CredentialDetectedError as exc:
+            print(str(exc))
+            return 1
+        print(f"Imported files: {imported}")
         return 0
     if args.command == "import-pending":
         try:
-            report = memory.import_pending(paths=args.path or None, days=args.days, dry_run=args.dry_run)
+            report = memory.import_pending(
+                paths=args.path or None,
+                days=args.days,
+                dry_run=args.dry_run,
+                allow_credentials=args.allow_credentials,
+            )
         except ValueError as exc:
             parser.error(str(exc))
         for key in ("roots", "found", "imported", "archived", "skipped", "errors", "dry_run"):
@@ -275,7 +294,16 @@ def main(argv: list[str] | None = None) -> int:
         return 0 if not report["errors"] else 1
     if args.command == "learn":
         if args.from_github_pr:
-            result = memory.learn_from_github_pr(args.from_github_pr, actor=args.actor, source=args.source)
+            try:
+                result = memory.learn_from_github_pr(
+                    args.from_github_pr,
+                    actor=args.actor,
+                    source=args.source,
+                    allow_credentials=args.allow_credentials,
+                )
+            except CredentialDetectedError as exc:
+                print(str(exc))
+                return 1
             print(result.message)
             return 0 if result.disposition != "skipped" else 1
         if args.from_session:
@@ -289,15 +317,23 @@ def main(argv: list[str] | None = None) -> int:
                 goal=args.goal,
                 outcome=args.outcome,
                 findings=args.finding,
+                allow_credentials=args.allow_credentials,
             )
             if args.dry_run:
                 print(memory.render_session_preview(result))
             else:
                 print(result.message)
-            return 1 if result.disposition in {"verification_failed", "fallback_failed"} else 0
+            return 1 if result.disposition in {"verification_failed", "fallback_failed", "credential_blocked"} else 0
         payload = _learning_payload(args)
         allowed = {field.name for field in fields(TaskLearningInput)}
-        path = memory.learn(TaskLearningInput(**{key: value for key, value in payload.items() if key in allowed}))
+        try:
+            path = memory.learn(
+                TaskLearningInput(**{key: value for key, value in payload.items() if key in allowed}),
+                allow_credentials=args.allow_credentials,
+            )
+        except CredentialDetectedError as exc:
+            print(str(exc))
+            return 1
         print(f"Learned: {path}")
         return 0
     if args.command == "digest":
@@ -342,7 +378,16 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{key}: {value}")
         return 0
     if args.command == "github-pr":
-        result = memory.learn_from_github_pr(args.url, actor=args.actor, source=args.source)
+        try:
+            result = memory.learn_from_github_pr(
+                args.url,
+                actor=args.actor,
+                source=args.source,
+                allow_credentials=args.allow_credentials,
+            )
+        except CredentialDetectedError as exc:
+            print(str(exc))
+            return 1
         print(result.message)
         return 0 if result.disposition != "skipped" else 1
     if args.command == "github-pr-deduplicate":
@@ -368,7 +413,16 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(f"Could not read candidate JSON: {exc}")
         if not isinstance(report, dict):
             parser.error("Candidate JSON must contain an object")
-        result = memory.upsert_oss_candidate(report, actor=args.actor, source=args.source)
+        try:
+            result = memory.upsert_oss_candidate(
+                report,
+                actor=args.actor,
+                source=args.source,
+                allow_credentials=args.allow_credentials,
+            )
+        except CredentialDetectedError as exc:
+            print(str(exc))
+            return 1
         print(result.message)
         return 0 if result.disposition != "skipped" else 1
     if args.command == "drafts":
@@ -385,7 +439,12 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"  path: {item['path']}")
             return 0
         if draft_command == "promote":
-            print(f"Promoted: {memory.promote_draft(args.id)}")
+            try:
+                path = memory.promote_draft(args.id, allow_credentials=args.allow_credentials)
+            except CredentialDetectedError as exc:
+                print(str(exc))
+                return 1
+            print(f"Promoted: {path}")
             return 0
         if draft_command == "drop":
             print(f"Dropped: {memory.drop_draft(args.id)}")
