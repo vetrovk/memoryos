@@ -49,6 +49,14 @@ Initializes an empty memory home with the required folders and local SQLite inde
 
 See [examples/example-decision.md](examples/example-decision.md) for a standalone note-format example. It is not installed into a memory home.
 
+## `memory agents`
+
+```bash
+memory agents my-project --target MEMORYOS-AGENTS.md
+```
+
+Generates a project-specific `AGENTS.md` template with MemoryOS search, context, and post-task learning instructions for coding agents. The command overwrites its target, so generate to a temporary filename when a project already has `AGENTS.md`, then merge the MemoryOS sections deliberately. This is an instruction-file integration, not a native Codex integration.
+
 ## Makefile Shortcuts
 
 ```bash

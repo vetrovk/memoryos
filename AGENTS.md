@@ -24,6 +24,17 @@ memory import-pending --dry-run
 
 Do not fall back to the system Python or the repository-local `./memory` file. If `memory` is unavailable, install the project into the active virtual environment first.
 
+## MemoryOS retrieval
+
+At the start of a task, search or load project context when the work may depend on an earlier decision, investigation, error, review, PR, or handoff. Use the installed CLI:
+
+```bash
+memory context <project> --session
+memory search "<specific topic>" --project <project>
+```
+
+Do not run a memory search by rote before every task. Use it when prior local knowledge is likely to change the work, then rely on the results that are relevant to the current task.
+
 ## Rules
 
 - Do not send personal, health, or work memory data to external APIs.

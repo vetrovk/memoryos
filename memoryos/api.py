@@ -1607,6 +1607,12 @@ class Memory:
 - Rebuild index: `memory rebuild`
 - Doctor: `memory doctor`
 
+## MemoryOS Retrieval
+
+- At the start of a task, search or load context when earlier decisions, investigations, errors, reviews, PRs, or handoffs may be relevant.
+- Use `memory context {project} --session` for a compact handoff, or `memory search "<specific topic>" --project {project}` for a focused question.
+- Do not run a memory search by rote before every task.
+
 ## Current Memory Stats
 
 - Notes: {stats.get('notes', 0)}
@@ -1618,7 +1624,7 @@ class Memory:
 - Work local first.
 - Do not send private, work, or health data to external APIs automatically.
 - Preserve Markdown frontmatter IDs.
-- Record important decisions, errors, commands, and architecture changes back into MemoryOS.
+- After useful completed work, record important decisions, errors, commands, and architecture changes with `memory learn --from-session --actor codex --source codex`.
 """
         path.write_text(body, encoding="utf-8")
         return path

@@ -46,6 +46,18 @@ class InitTests(unittest.TestCase):
         self.assertIn("initialized: empty memory home", output.getvalue())
         self.assertIn("next: memory learn", output.getvalue())
 
+    def test_generate_agents_includes_retrieval_and_learning_workflow(self) -> None:
+        self.memory.init()
+        target = Path(self.temp.name) / "MEMORYOS-AGENTS.md"
+
+        self.memory.generate_agents("demo", target)
+
+        body = target.read_text(encoding="utf-8")
+        self.assertIn("memory context demo --session", body)
+        self.assertIn('memory search "<specific topic>" --project demo', body)
+        self.assertIn("Do not run a memory search by rote", body)
+        self.assertIn("memory learn --from-session --actor codex --source codex", body)
+
     def test_repeat_init_preserves_existing_user_note(self) -> None:
         self.memory.init()
         note = self.memory.add(NoteInput(title="Keep my decision", type="decision", text="User data must remain intact."))
