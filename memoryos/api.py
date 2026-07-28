@@ -1607,11 +1607,17 @@ class Memory:
 - Rebuild index: `memory rebuild`
 - Doctor: `memory doctor`
 
-## MemoryOS Retrieval
+## Required MemoryOS Lookup
 
-- At the start of a task, search or load context when earlier decisions, investigations, errors, reviews, PRs, or handoffs may be relevant.
-- Use `memory context {project} --session` for a compact handoff, or `memory search "<specific topic>" --project {project}` for a focused question.
-- Do not run a memory search by rote before every task.
+Before substantive work that changes tracked files, project behavior, configuration, or leads to a Git commit:
+
+1. Run `memory context {project} --session`.
+2. Run `memory search --project {project} --query "<task terms>"`.
+3. Before creating a commit, also run `memory search --project {project} --query "commit convention release"`.
+
+Do not edit tracked files or create a commit until the lookup gate completes. It does not apply to simple read-only commands such as `pwd`, `git status`, or `memory --help`.
+
+In commentary, report exactly one outcome: `MemoryOS lookup: found <note title or id>; applying <constraint>.`, `MemoryOS lookup: no relevant records for <terms>.`, or `MemoryOS lookup: unavailable: <reason>.`
 
 ## Current Memory Stats
 
@@ -1624,6 +1630,7 @@ class Memory:
 - Work local first.
 - Do not send private, work, or health data to external APIs automatically.
 - Preserve Markdown frontmatter IDs.
+- The repository owner authorizes a local-only summary of the current task to the configured MemoryOS home. It must not send data to a network destination or include credentials, secrets, or full private file contents.
 - After useful completed work, record important decisions, errors, commands, and architecture changes with `memory learn --from-session --actor codex --source codex`.
 """
         path.write_text(body, encoding="utf-8")

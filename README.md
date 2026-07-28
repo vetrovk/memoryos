@@ -41,7 +41,7 @@ memory learn --from-session --actor codex --source codex
 
 MemoryOS is not built into Codex. Codex follows the instructions in a project's `AGENTS.md`, and those instructions tell it when to search local memory and when to save useful task results.
 
-Generate a project-specific instruction file after installing MemoryOS. Use a temporary filename when the project already has `AGENTS.md`, then merge the generated MemoryOS sections into that file. If it has no `AGENTS.md`, rename the generated file to `AGENTS.md`.
+Generate a project-specific instruction file after installing MemoryOS. Use a temporary filename when the project already has `AGENTS.md`, then merge the generated MemoryOS sections into that file. If it has no `AGENTS.md`, rename the generated file to `AGENTS.md`. Projects with an older generated file must regenerate it or manually merge the latest MemoryOS sections.
 
 macOS or Linux:
 
@@ -57,7 +57,7 @@ Windows PowerShell:
 memory agents my-project --target "C:\path\to\my-project\MEMORYOS-AGENTS.md"
 ```
 
-Make sure the installed `memory` command is available in the environment Codex uses. With these instructions in the project, Codex can search when a task depends on earlier decisions, investigations, errors, or handoff context. It should not run a memory search by rote before every task, and it saves useful experience after completed work.
+Open Codex with the real repository root as its workspace. An `AGENTS.md` in a different folder, copy, or staging workspace is not loaded into that session. Make sure the installed `memory` command is available in the environment Codex uses. With these instructions in the project, Codex performs a required lookup before substantive changes and commits, reports the lookup outcome in commentary, and saves useful experience after completed work.
 
 Continue with the [examples](#examples), [CLI reference](CLI.md), [architecture](ARCHITECTURE.md), and [privacy notes](PRIVACY.md) below. The repository contains the engine only; keep your actual memory folder outside it.
 
