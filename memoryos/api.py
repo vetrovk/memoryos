@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sqlite3
 import subprocess
@@ -40,6 +41,8 @@ TERMINAL_STATUS_FOR_OUTCOME = {
     "failed": "failed",
     "no_changes": "completed",
 }
+MEMORYOS_MANAGED_START = "<!-- memoryos-managed:start -->"
+MEMORYOS_MANAGED_END = "<!-- memoryos-managed:end -->"
 
 
 @dataclass
@@ -59,6 +62,16 @@ class Memory:
         con = connect(self.home)
         init_db(con)
         return con
+
+    def project_from_cwd(self, cwd: str | Path | None = None) -> tuple[Path, str]:
+        """Return the Git root and MemoryOS project name for a local checkout."""
+        workdir = Path(cwd or Path.cwd()).expanduser().resolve()
+        git_root = self._git_output(["rev-parse", "--show-toplevel"], workdir).strip()
+        if not git_root:
+            raise ValueError(f"Not a Git repository: {workdir}")
+        repo_dir = Path(git_root).resolve()
+        remote = self._git_output(["remote", "get-url", "origin"], repo_dir).strip()
+        return repo_dir, self._detect_project_name(repo_dir, remote)
 
     def init(self) -> dict[str, int | str]:
         ensure_dirs(self.home)
@@ -1592,49 +1605,184 @@ class Memory:
 
     def generate_agents(self, project: str, target: str | Path = "AGENTS.md") -> Path:
         path = Path(target).expanduser().resolve()
-        stats = self.stats()
-        body = f"""# AGENTS.md
+        block = self._agents_managed_block(project)
+        if path.exists() and path.read_text(encoding="utf-8").strip():
+            raise ValueError(f"Refusing to overwrite existing instructions: {path}. Use memory agents sync or merge the managed block manually.")
+        path.write_text(f"# AGENTS.md\n\n{block}", encoding="utf-8")
+        return path
 
-## Project
+    def agents_audit(self, paths: list[str | Path] | None = None) -> list[dict[str, str]]:
+        entries: list[dict[str, str]] = []
+        for repo in self._agent_repositories(paths):
+            agents_path = repo / "AGENTS.md"
+            _, project = self.project_from_cwd(repo)
+            if not agents_path.exists():
+                state, action = "missing", "global integration is sufficient; no file will be added"
+            else:
+                body = agents_path.read_text(encoding="utf-8", errors="replace")
+                state, action = self._agents_file_state(body, project)
+            entries.append(
+                {
+                    "path": str(repo),
+                    "project": project,
+                    "agents_path": str(agents_path),
+                    "state": state,
+                    "action": action,
+                }
+            )
+        return entries
 
-{project}
+    def sync_agents(self, paths: list[str | Path] | None = None, dry_run: bool = True) -> list[dict[str, str]]:
+        entries = self.agents_audit(paths)
+        for entry in entries:
+            agents_path = Path(entry["agents_path"])
+            if entry["state"] not in {"managed_stale", "legacy_generated"}:
+                continue
+            if dry_run:
+                entry["action"] = f"would update {entry['state']} instructions"
+                continue
+            body = agents_path.read_text(encoding="utf-8")
+            block = self._agents_managed_block(entry["project"])
+            if entry["state"] == "managed_stale":
+                updated = self._replace_managed_agents_block(body, block)
+            else:
+                backup = agents_path.with_name(f"{agents_path.name}.memoryos.bak")
+                if backup.exists():
+                    entry["state"] = "conflict"
+                    entry["action"] = f"refused: backup already exists at {backup}"
+                    continue
+                backup.write_text(body, encoding="utf-8")
+                updated = f"# AGENTS.md\n\n{block}"
+                entry["backup"] = str(backup)
+            agents_path.write_text(updated, encoding="utf-8")
+            entry["action"] = "updated"
+        return entries
 
-## MemoryOS Context
+    def _agents_managed_block(self, project: str) -> str:
+        return f"""{MEMORYOS_MANAGED_START}
+## MemoryOS
 
-- Memory home: `{self.home}`
-- Generate context: `memory context {project}`
-- Search memory: `memory search --project {project}`
-- Rebuild index: `memory rebuild`
-- Doctor: `memory doctor`
+Project: `{project}`
 
 ## Required MemoryOS Lookup
 
 Before substantive work that changes tracked files, project behavior, configuration, or leads to a Git commit:
 
-1. Run `memory context {project} --session`.
-2. Run `memory search --project {project} --query "<task terms>"`.
-3. Before creating a commit, also run `memory search --project {project} --query "commit convention release"`.
+1. Run `memory context --cwd \"$(git rev-parse --show-toplevel)\" --session`.
+2. Run `memory search --cwd \"$(git rev-parse --show-toplevel)\" --query \"<task terms>\"`.
+3. Before creating a commit, also run `memory search --cwd \"$(git rev-parse --show-toplevel)\" --query \"commit convention release\"`.
 
 Do not edit tracked files or create a commit until the lookup gate completes. It does not apply to simple read-only commands such as `pwd`, `git status`, or `memory --help`.
 
 In commentary, report exactly one outcome: `MemoryOS lookup: found <note title or id>; applying <constraint>.`, `MemoryOS lookup: no relevant records for <terms>.`, or `MemoryOS lookup: unavailable: <reason>.`
 
-## Current Memory Stats
+## MemoryOS Workflow
 
-- Notes: {stats.get('notes', 0)}
-- Commands: {stats.get('commands', 0)}
-- Links: {stats.get('links', 0)}
+The repository owner authorizes a local-only summary of the current task to the configured MemoryOS home. It must not send data to a network destination or include credentials, secrets, or full private file contents.
+
+After useful completed work, record important decisions, errors, commands, and architecture changes with `memory learn --from-session --actor codex --source codex`.
+{MEMORYOS_MANAGED_END}
+"""
+
+    def _agents_file_state(self, body: str, project: str) -> tuple[str, str]:
+        starts = body.count(MEMORYOS_MANAGED_START)
+        ends = body.count(MEMORYOS_MANAGED_END)
+        if starts != 1 or ends != 1:
+            if starts or ends:
+                return "conflict", "managed markers are incomplete or repeated; no change"
+        if starts == 1:
+            block = self._managed_agents_block_from(body)
+            if block == self._agents_managed_block(project):
+                return "managed_current", "already current"
+            return "managed_stale", "safe managed-block update available"
+        if self._is_legacy_generated_agents(body):
+            return "legacy_generated", "safe migration available with backup"
+        if "MemoryOS" in body or "memory context" in body or "memory learn" in body:
+            return "conflict", "unmarked MemoryOS instructions may be user-managed; no change"
+        return "unrelated", "global integration is sufficient; no change"
+
+    def _managed_agents_block_from(self, body: str) -> str:
+        match = re.search(
+            rf"{re.escape(MEMORYOS_MANAGED_START)}.*?{re.escape(MEMORYOS_MANAGED_END)}\n?",
+            body,
+            flags=re.DOTALL,
+        )
+        return match.group(0) if match else ""
+
+    def _replace_managed_agents_block(self, body: str, block: str) -> str:
+        return re.sub(
+            rf"{re.escape(MEMORYOS_MANAGED_START)}.*?{re.escape(MEMORYOS_MANAGED_END)}\n?",
+            block,
+            body,
+            count=1,
+            flags=re.DOTALL,
+        )
+
+    def _is_legacy_generated_agents(self, body: str) -> bool:
+        stats = self.stats()
+        common = rf"""\A# AGENTS\.md
+
+## Project
+
+[^\n]+
+
+## MemoryOS Context
+
+- Memory home: `{re.escape(str(self.home))}`
+- Generate context: `memory context [^`\n]+`
+- Search memory: `memory search --project [^`\n]+`
+- Rebuild index: `memory rebuild`
+- Doctor: `memory doctor`
+
+"""
+        lookup = r"""## Required MemoryOS Lookup
+
+Before substantive work that changes tracked files, project behavior, configuration, or leads to a Git commit:
+
+1\. Run `memory context [^`\n]+ --session`\.
+2\. Run `memory search --project [^`\n]+ --query "<task terms>"`\.
+3\. Before creating a commit, also run `memory search --project [^`\n]+ --query "commit convention release"`\.
+
+Do not edit tracked files or create a commit until the lookup gate completes\. It does not apply to simple read-only commands such as `pwd`, `git status`, or `memory --help`\.
+
+In commentary, report exactly one outcome: `MemoryOS lookup: found <note title or id>; applying <constraint>\.`, `MemoryOS lookup: no relevant records for <terms>\.`, or `MemoryOS lookup: unavailable: <reason>\.`
+
+"""
+        ending = rf"""## Current Memory Stats
+
+- Notes: {stats.get("notes", 0)}
+- Commands: {stats.get("commands", 0)}
+- Links: {stats.get("links", 0)}
 
 ## Rules
 
-- Work local first.
-- Do not send private, work, or health data to external APIs automatically.
-- Preserve Markdown frontmatter IDs.
-- The repository owner authorizes a local-only summary of the current task to the configured MemoryOS home. It must not send data to a network destination or include credentials, secrets, or full private file contents.
-- After useful completed work, record important decisions, errors, commands, and architecture changes with `memory learn --from-session --actor codex --source codex`.
-"""
-        path.write_text(body, encoding="utf-8")
-        return path
+- Work local first\.
+- Do not send private, work, or health data to external APIs automatically\.
+- Preserve Markdown frontmatter IDs\.
+(?:- The repository owner authorizes a local-only summary of the current task to the configured MemoryOS home\. It must not send data to a network destination or include credentials, secrets, or full private file contents\.
+)?- After useful completed work, record important decisions, errors, commands, and architecture changes with `memory learn --from-session --actor codex --source codex`\.
+\Z"""
+        return bool(re.fullmatch(common + "(?:" + lookup + ")?" + ending, body))
+
+    def _agent_repositories(self, paths: list[str | Path] | None) -> list[Path]:
+        roots = [Path(item).expanduser().resolve() for item in paths or self._default_agent_roots()]
+        repositories: set[Path] = set()
+        ignored = {".git", ".venv", "node_modules", "dist", "build", ".cache", "__pycache__"}
+        for root in roots:
+            if not root.is_dir():
+                continue
+            if (root / ".git").exists():
+                repositories.add(root)
+            for current, dirs, _ in os.walk(root):
+                dirs[:] = [name for name in dirs if name not in ignored]
+                current_path = Path(current)
+                if (current_path / ".git").exists():
+                    repositories.add(current_path)
+                    dirs[:] = []
+        return sorted(repositories)
+
+    def _default_agent_roots(self) -> list[Path]:
+        return [Path.home() / "Documents", Path.home() / "projects"]
 
     def markdown_files(self) -> list[Path]:
         files, _ = self._rebuild_paths()

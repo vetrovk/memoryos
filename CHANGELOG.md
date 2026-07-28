@@ -2,6 +2,18 @@
 
 All notable public changes to MemoryOS are documented here.
 
+## [0.3.0] - 2026-07-28
+
+### Added
+
+- `memory context --cwd <git-root>` and `memory search --cwd <git-root>` derive the project from the real Git checkout for reusable agent workflows.
+- `memory agents audit` reports the state of project-level MemoryOS instructions without writing files.
+- `memory agents sync --dry-run` and `--apply` safely update only marker-managed blocks or exact legacy generated templates.
+
+### Changed
+
+- Codex integration guidance now uses a one-time global `~/.codex/AGENTS.md` workflow instead of requiring a generated file in every Git project.
+
 ## [0.2.3] - 2026-07-27
 
 ### Fixed

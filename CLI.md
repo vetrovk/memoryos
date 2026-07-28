@@ -31,12 +31,15 @@ memory search "oracle bot"
 memory search --project oracle --type decision
 memory context oracle
 memory context oracle --session
+memory context --cwd "$(git rev-parse --show-toplevel)" --session
+memory search --cwd "$(git rev-parse --show-toplevel)" --query "release notes"
 memory digest
 memory doctor
 memory rebuild
 memory stats
 memory graph
-memory agents oracle --target AGENTS.md
+memory agents audit --path ~/Documents --path ~/projects
+memory agents sync --dry-run --path ~/Documents --path ~/projects
 ```
 
 ## `memory init`
@@ -52,10 +55,22 @@ See [examples/example-decision.md](examples/example-decision.md) for a standalon
 ## `memory agents`
 
 ```bash
+memory agents audit --path ~/Documents --path ~/projects
+memory agents sync --dry-run --path ~/Documents --path ~/projects
+memory agents sync --apply --path ~/Documents --path ~/projects
+```
+
+`audit` recursively lists Git repositories and classifies each project-level `AGENTS.md` without writing: `missing`, current managed, stale managed, exact legacy generated, conflict, or unrelated. `sync --dry-run` reports only the updates that would be safe. `sync --apply` updates a marker-managed MemoryOS block, or migrates an exact legacy generated template after creating `AGENTS.md.memoryos.bak`. It never changes missing, unrelated, custom, ambiguous, or incomplete-marker files.
+
+For global Codex integration, add the MemoryOS sections from the repository [AGENTS.md](AGENTS.md) to `~/.codex/AGENTS.md` once. The resulting instructions use `--cwd` to detect the actual Git checkout, so new projects do not need a generated file.
+
+To create a new project-specific template intentionally:
+
+```bash
 memory agents my-project --target MEMORYOS-AGENTS.md
 ```
 
-Generates a project-specific `AGENTS.md` template with MemoryOS search, context, and post-task learning instructions for coding agents. The command overwrites its target, so generate to a temporary filename when a project already has `AGENTS.md`, then merge the MemoryOS sections deliberately. This is an instruction-file integration, not a native Codex integration.
+Generation refuses to overwrite an existing nonempty target. This is an instruction-file integration, not a native Codex integration.
 
 ## Makefile Shortcuts
 

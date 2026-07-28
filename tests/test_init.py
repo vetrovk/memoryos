@@ -53,13 +53,24 @@ class InitTests(unittest.TestCase):
         self.memory.generate_agents("demo", target)
 
         body = target.read_text(encoding="utf-8")
-        self.assertIn("memory context demo --session", body)
-        self.assertIn('memory search --project demo --query "<task terms>"', body)
-        self.assertIn('memory search --project demo --query "commit convention release"', body)
+        self.assertIn("<!-- memoryos-managed:start -->", body)
+        self.assertIn('memory context --cwd "$(git rev-parse --show-toplevel)" --session', body)
+        self.assertIn('memory search --cwd "$(git rev-parse --show-toplevel)" --query "<task terms>"', body)
+        self.assertIn('memory search --cwd "$(git rev-parse --show-toplevel)" --query "commit convention release"', body)
         self.assertIn("Do not edit tracked files or create a commit", body)
         self.assertIn("MemoryOS lookup: found <note title or id>", body)
         self.assertIn("The repository owner authorizes a local-only summary", body)
         self.assertIn("memory learn --from-session --actor codex --source codex", body)
+
+    def test_generate_agents_refuses_to_overwrite_existing_instructions(self) -> None:
+        self.memory.init()
+        target = Path(self.temp.name) / "AGENTS.md"
+        target.write_text("# Existing instructions\n", encoding="utf-8")
+
+        with self.assertRaises(ValueError):
+            self.memory.generate_agents("demo", target)
+
+        self.assertEqual(target.read_text(encoding="utf-8"), "# Existing instructions\n")
 
     def test_repeat_init_preserves_existing_user_note(self) -> None:
         self.memory.init()

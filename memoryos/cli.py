@@ -82,12 +82,14 @@ def build_parser() -> argparse.ArgumentParser:
     search.add_argument("query_pos", nargs="?", default="")
     search.add_argument("--query", default="")
     search.add_argument("--project", default="")
+    search.add_argument("--cwd", default="", help="Detect the MemoryOS project from this Git working tree.")
     search.add_argument("--tags", default="")
     search.add_argument("--type", default="")
     search.add_argument("--limit", type=int, default=10)
 
     context = add_home(sub.add_parser("context"))
-    context.add_argument("project")
+    context.add_argument("project", nargs="?", default="")
+    context.add_argument("--cwd", default="", help="Detect the MemoryOS project from this Git working tree.")
     context.add_argument("--limit", type=int, default=12)
     context.add_argument("--session", action="store_true", help="Print a bounded, read-only session handoff instead of exporting a file.")
     context.add_argument("--max-bytes", type=int, default=6144, help="Maximum UTF-8 bytes for --session output.")
@@ -125,8 +127,11 @@ def build_parser() -> argparse.ArgumentParser:
     learn.add_argument("--dry-run", action="store_true")
 
     agents = add_home(sub.add_parser("agents"))
-    agents.add_argument("project")
+    agents.add_argument("project", nargs="?", default="")
     agents.add_argument("--target", default="AGENTS.md")
+    agents.add_argument("--path", action="append", default=[], help="Root to scan for Git repositories; repeatable.")
+    agents.add_argument("--dry-run", action="store_true", help="Show sync changes without writing files.")
+    agents.add_argument("--apply", action="store_true", help="Apply safe managed-block updates during agents sync.")
     return parser
 
 
@@ -174,7 +179,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "search":
         query = args.query or args.query_pos
-        results = memory.search(query=query, project=args.project, tags=split_tags(args.tags), note_type=args.type, limit=args.limit)
+        if args.cwd and args.project:
+            parser.error("Use either --project or --cwd for search, not both")
+        project = memory.project_from_cwd(args.cwd)[1] if args.cwd else args.project
+        results = memory.search(query=query, project=project, tags=split_tags(args.tags), note_type=args.type, limit=args.limit)
         if not results:
             print("No results.")
             return 0
@@ -187,8 +195,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"   {result.snippet}")
         return 0
     if args.command == "context":
+        if args.cwd and args.project:
+            parser.error("Use either a project or --cwd for context, not both")
+        project = memory.project_from_cwd(args.cwd)[1] if args.cwd else args.project
+        if not project:
+            parser.error("context requires a project or --cwd")
         try:
-            result = memory.context(args.project, limit=args.limit, session=args.session, max_bytes=args.max_bytes)
+            result = memory.context(project, limit=args.limit, session=args.session, max_bytes=args.max_bytes)
         except ValueError as exc:
             parser.error(str(exc))
         if args.session:
@@ -319,7 +332,37 @@ def main(argv: list[str] | None = None) -> int:
             print(f"Dropped: {memory.drop_draft(args.id)}")
             return 0
     if args.command == "agents":
-        print(f"Generated: {memory.generate_agents(args.project, args.target)}")
+        mode = args.project if args.project in {"audit", "sync"} else ""
+        if mode:
+            if args.target != "AGENTS.md":
+                parser.error("--target is only valid when generating an AGENTS.md template")
+            if mode == "audit":
+                if args.apply or args.dry_run:
+                    parser.error("agents audit does not accept --apply or --dry-run")
+                entries = memory.agents_audit(args.path or None)
+            else:
+                if args.apply and args.dry_run:
+                    parser.error("Use either --dry-run or --apply for agents sync")
+                if not args.apply and not args.dry_run:
+                    parser.error("agents sync requires --dry-run or --apply")
+                entries = memory.sync_agents(args.path or None, dry_run=not args.apply)
+            for entry in entries:
+                print(f"{entry['state']}: {entry['path']}")
+                print(f"  project: {entry['project']}")
+                print(f"  AGENTS.md: {entry['agents_path']}")
+                print(f"  action: {entry['action']}")
+                if entry.get("backup"):
+                    print(f"  backup: {entry['backup']}")
+            return 0
+        if not args.project:
+            parser.error("agents requires a project name, audit, or sync")
+        if args.path or args.dry_run or args.apply:
+            parser.error("--path, --dry-run, and --apply are only valid for agents audit or sync")
+        try:
+            target = memory.generate_agents(args.project, args.target)
+        except ValueError as exc:
+            parser.error(str(exc))
+        print(f"Generated: {target}")
         return 0
     parser.error("Unknown command")
     return 2

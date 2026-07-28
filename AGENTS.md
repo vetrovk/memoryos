@@ -29,14 +29,14 @@ Do not fall back to the system Python or the repository-local `./memory` file. I
 Before substantive work that changes tracked files, project behavior, configuration, or leads to a Git commit, complete this lookup gate with the installed CLI:
 
 ```bash
-memory context <project> --session
-memory search --project <project> --query "<task terms>"
+memory context --cwd "$(git rev-parse --show-toplevel)" --session
+memory search --cwd "$(git rev-parse --show-toplevel)" --query "<task terms>"
 ```
 
 Before creating a commit, also run:
 
 ```bash
-memory search --project <project> --query "commit convention release"
+memory search --cwd "$(git rev-parse --show-toplevel)" --query "commit convention release"
 ```
 
 Do not edit tracked files or create a commit until the lookup gate completes. It does not apply to simple read-only commands such as `pwd`, `git status`, or `memory --help`.

@@ -39,27 +39,26 @@ memory learn --from-session --actor codex --source codex
 
 ## Connect MemoryOS to Codex
 
-MemoryOS is not built into Codex. Codex follows the instructions in a project's `AGENTS.md`, and those instructions tell it when to search local memory and when to save useful task results.
+MemoryOS is not built into Codex. To enable the workflow across Git projects, add the MemoryOS lookup and workflow sections from this repository's [AGENTS.md](AGENTS.md) to your global Codex instructions at `~/.codex/AGENTS.md` once. Codex loads that file when a new session starts.
 
-Generate a project-specific instruction file after installing MemoryOS. Use a temporary filename when the project already has `AGENTS.md`, then merge the generated MemoryOS sections into that file. If it has no `AGENTS.md`, rename the generated file to `AGENTS.md`. Projects with an older generated file must regenerate it or manually merge the latest MemoryOS sections.
+The global instructions make Codex resolve the real Git root, then use `memory context --cwd` and `memory search --cwd`. That avoids hard-coding a project name and works for old and new repositories without adding a generated file to each project. They do not run for trivial read-only commands, and they do not guarantee that Codex can access memory in every sandbox.
 
-macOS or Linux:
+Open Codex with the actual Git checkout as its workspace. A staging copy without `.git`, or an `AGENTS.md` in another folder, cannot reliably identify the project or supply instructions to the session. Restart or create a new Codex session after changing global instructions.
+
+Audit older project-level files before changing any of them:
 
 ```bash
-. .venv/bin/activate
-memory agents my-project --target /path/to/my-project/MEMORYOS-AGENTS.md
+memory agents audit --path ~/Documents --path ~/projects
+memory agents sync --dry-run --path ~/Documents --path ~/projects
 ```
 
-Windows PowerShell:
+`audit` only reports state. `sync --dry-run` shows safe updates without writing. `sync --apply` updates only MemoryOS-managed blocks or exact legacy templates, creates a backup for a migrated legacy template, and leaves custom or ambiguous `AGENTS.md` files unchanged.
 
-```powershell
-.\.venv\Scripts\Activate.ps1
-memory agents my-project --target "C:\path\to\my-project\MEMORYOS-AGENTS.md"
-```
+`memory agents <project> --target <new-file>` remains available for a deliberately project-specific template, but it refuses to overwrite an existing instruction file.
 
-Open Codex with the real repository root as its workspace. An `AGENTS.md` in a different folder, copy, or staging workspace is not loaded into that session. Make sure the installed `memory` command is available in the environment Codex uses. With these instructions in the project, Codex performs a required lookup before substantive changes and commits, reports the lookup outcome in commentary, and saves useful experience after completed work.
+With the global instructions installed, Codex performs a required lookup before substantive changes and commits, reports the lookup outcome in commentary, and saves useful local experience after completed work. The local summary must not include credentials, secrets, or full private file contents.
 
-Continue with the [examples](#examples), [CLI reference](CLI.md), [architecture](ARCHITECTURE.md), and [privacy notes](PRIVACY.md) below. The repository contains the engine only; keep your actual memory folder outside it.
+For more detail, continue with the [examples](#examples), [CLI reference](CLI.md), [architecture](ARCHITECTURE.md), and [privacy notes](PRIVACY.md) below. The repository contains the engine only; keep your actual memory folder outside it.
 
 ## More detail
 
@@ -120,6 +119,13 @@ To prepare a compact, read-only handoff for a known project:
 ```bash
 memory context memoryos --session
 memory context memoryos --session --limit 8 --max-bytes 4096
+```
+
+Or derive the project from a real Git working tree:
+
+```bash
+memory context --cwd "$(git rev-parse --show-toplevel)" --session
+memory search --cwd "$(git rev-parse --show-toplevel)" --query "release notes"
 ```
 
 Session context is opt-in. It uses existing project memory only, writes nothing, starts no hooks or background process, and reports its actual UTF-8 size and truncation state. After a permanent `memory learn --from-session` save, MemoryOS verifies the Markdown file, metadata, SQLite index, and normal search retrieval before reporting success.
