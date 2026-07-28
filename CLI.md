@@ -1,5 +1,7 @@
 # MemoryOS CLI
 
+This reference matches MemoryOS v0.4.0 Public Beta.
+
 Primary command:
 
 ```bash

@@ -50,6 +50,7 @@ Audit older project-level files before changing any of them:
 ```bash
 memory agents audit --path ~/Documents --path ~/projects
 memory agents sync --dry-run --path ~/Documents --path ~/projects
+memory agents sync --apply --path ~/Documents --path ~/projects
 ```
 
 `audit` only reports state. `sync --dry-run` shows safe updates without writing. `sync --apply` updates only MemoryOS-managed blocks or exact legacy templates, creates a backup for a migrated legacy template, and leaves custom or ambiguous `AGENTS.md` files unchanged.
@@ -232,7 +233,7 @@ MemoryOS has no bulk-delete command. Archive or remove local Markdown notes with
 
 ## Current Status
 
-MemoryOS v0.2.1 is an actively used public beta. The command-line workflow and Markdown format are usable now; the Python API and note schema may still change before a stable 1.0 release. Bug reports and focused issues through GitHub Issues, plus small pull requests, are welcome.
+MemoryOS v0.4.0 is an actively used public beta. The command-line workflow and Markdown format are usable now; the Python API and note schema may still change before a stable 1.0 release. Bug reports and focused issues through GitHub Issues, plus small pull requests, are welcome.
 
 ## Development
 
