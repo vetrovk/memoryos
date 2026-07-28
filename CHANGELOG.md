@@ -2,6 +2,12 @@
 
 All notable public changes to MemoryOS are documented here.
 
+## [0.5.0] - 2026-07-28
+
+### Added
+
+- Optional stdio-only read-only MCP server with bounded search, project context, note opening, and memory statistics tools.
+
 ## [0.4.0] - 2026-07-28
 
 ### Added

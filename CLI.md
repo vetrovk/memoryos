@@ -101,6 +101,15 @@ memory agents my-project --target MEMORYOS-AGENTS.md
 
 Generation refuses to overwrite an existing nonempty target. This is an instruction-file integration, not a native Codex integration.
 
+## `memory mcp serve`
+
+```bash
+python -m pip install "memoryos-local[mcp]"
+memory mcp serve
+```
+
+Runs an optional stdio-only MCP server. It exposes only `search_memory`, `get_project_context`, `open_memory`, and `get_memory_stats`. The server has no write tools, network transport, background daemon, or access to arbitrary local files. Results are bounded and omit memory-home paths. Without the optional dependency, the command prints the installation command and exits without affecting ordinary MemoryOS commands.
+
 ## Makefile Shortcuts
 
 ```bash

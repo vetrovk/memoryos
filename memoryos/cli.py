@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .api import Memory
 from .config import OBJECT_TYPES
+from .credentials import CredentialDetectedError
 from .models import NoteInput, TaskLearningInput
 from .util import split_tags
 
@@ -25,6 +26,13 @@ def build_parser() -> argparse.ArgumentParser:
     def add_home(command_parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
         command_parser.add_argument("--home", dest="home_after", default=None, help=argparse.SUPPRESS)
         return command_parser
+
+    def add_credential_override(command_parser: argparse.ArgumentParser) -> None:
+        command_parser.add_argument(
+            "--allow-credentials",
+            action="store_true",
+            help="Allow an intentional local save containing a detected credential.",
+        )
 
     add_home(
         sub.add_parser(
@@ -52,6 +60,7 @@ def build_parser() -> argparse.ArgumentParser:
     github_pr.add_argument("url")
     github_pr.add_argument("--actor", default="agent")
     github_pr.add_argument("--source", default="github")
+    add_credential_override(github_pr)
     github_pr_deduplicate = add_home(sub.add_parser("github-pr-deduplicate"))
     github_pr_deduplicate.add_argument("--dry-run", action="store_true", help="Show legacy GitHub PR duplicate groups.")
     github_pr_deduplicate.add_argument("--apply", action="store_true", help="Archive duplicates after merging their captures into a canonical note.")
@@ -62,12 +71,14 @@ def build_parser() -> argparse.ArgumentParser:
     oss_candidate_upsert.add_argument("--from-json", required=True, help="Structured OSS candidate JSON report.")
     oss_candidate_upsert.add_argument("--actor", default="agent")
     oss_candidate_upsert.add_argument("--source", default="oss-scout")
+    add_credential_override(oss_candidate_upsert)
 
     drafts = add_home(sub.add_parser("drafts"))
     drafts_sub = drafts.add_subparsers(dest="draft_command")
     add_home(drafts_sub.add_parser("review"))
     promote = add_home(drafts_sub.add_parser("promote"))
     promote.add_argument("id")
+    add_credential_override(promote)
     drop = add_home(drafts_sub.add_parser("drop"))
     drop.add_argument("id")
 
@@ -82,6 +93,7 @@ def build_parser() -> argparse.ArgumentParser:
     add.add_argument("--parent", default="")
     add.add_argument("--related", default="")
     add.add_argument("--aliases", default="")
+    add_credential_override(add)
 
     open_note = add_home(sub.add_parser("open", help="Open a saved note by id."))
     open_note.add_argument("note_id")
@@ -110,11 +122,13 @@ def build_parser() -> argparse.ArgumentParser:
     importer = add_home(sub.add_parser("import"))
     importer.add_argument("path")
     importer.add_argument("--project", default="")
+    add_credential_override(importer)
 
     pending_importer = add_home(sub.add_parser("import-pending"))
     pending_importer.add_argument("--path", action="append", default=[], help="Project root to search; repeatable. Default roots are configured paths or ~/Documents.")
     pending_importer.add_argument("--days", type=int, default=None, help="Only process JSON files modified in the last N days.")
     pending_importer.add_argument("--dry-run", action="store_true", help="Report matching .memoryos_pending JSON files without saving or archiving them.")
+    add_credential_override(pending_importer)
 
     learn = add_home(sub.add_parser("learn"))
     learn.add_argument("--from-json", default="", help="Read learning payload from JSON file, or '-' for stdin.")
@@ -138,6 +152,7 @@ def build_parser() -> argparse.ArgumentParser:
     learn.add_argument("--cwd", default="")
     learn.add_argument("--test-results", default="")
     learn.add_argument("--dry-run", action="store_true")
+    add_credential_override(learn)
 
     agents = add_home(sub.add_parser("agents"))
     agents.add_argument("project", nargs="?", default="")
@@ -145,6 +160,10 @@ def build_parser() -> argparse.ArgumentParser:
     agents.add_argument("--path", action="append", default=[], help="Root to scan for Git repositories; repeatable.")
     agents.add_argument("--dry-run", action="store_true", help="Show sync changes without writing files.")
     agents.add_argument("--apply", action="store_true", help="Apply safe managed-block updates during agents sync.")
+
+    mcp = add_home(sub.add_parser("mcp", help="Run optional read-only MCP tools over local memory."))
+    mcp_sub = mcp.add_subparsers(dest="mcp_command", required=True)
+    add_home(mcp_sub.add_parser("serve", help="Serve read-only MCP tools over stdio."))
     return parser
 
 
@@ -404,6 +423,16 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(str(exc))
         print(f"Generated: {target}")
         return 0
+    if args.command == "mcp":
+        if args.mcp_command == "serve":
+            try:
+                from .mcp_server import serve
+
+                serve(memory.home)
+            except RuntimeError as exc:
+                print(str(exc))
+                return 2
+            return 0
     parser.error("Unknown command")
     return 2
 

@@ -22,6 +22,7 @@ from .config import (
     memory_home,
     pending_import_state_path,
 )
+from .credentials import CredentialDetectedError, guard_credentials
 from .models import LearningSaveResult, NoteInput, SearchResult, SessionLearningPreview, TaskLearningInput
 from .search import SQLiteFTSSearchProvider
 from .storage import add_history, connect, connect_read_only, ensure_dirs, init_db, log_error
@@ -77,6 +78,43 @@ class Memory:
 
     def usage_stats(self, days: int | None = None, project: str = "") -> dict[str, object]:
         return usage_summary(self.home, days=days, project=project)
+
+    def search_read_only(self, query: str, project: str = "", limit: int = 10) -> list[SearchResult]:
+        if not database_path(self.home).exists():
+            return []
+        con = connect_read_only(self.home)
+        try:
+            return SQLiteFTSSearchProvider(con, self.home).search(query=query, project=project, limit=limit)
+        finally:
+            con.close()
+
+    def open_note_read_only(self, note_id: str) -> tuple[dict[str, object], str]:
+        if not database_path(self.home).exists():
+            raise ValueError("Memory index is unavailable")
+        con = connect_read_only(self.home)
+        try:
+            row = con.execute("SELECT path FROM notes WHERE id = ?", (note_id,)).fetchone()
+        finally:
+            con.close()
+        if row is None:
+            raise ValueError("Memory note was not found")
+        try:
+            return read_markdown(self.home / str(row["path"]))
+        except OSError as exc:
+            raise ValueError("Memory note could not be read") from exc
+
+    def memory_stats_read_only(self) -> dict[str, int]:
+        if not database_path(self.home).exists():
+            return {name: 0 for name in ["notes", "projects", "people", "repositories", "commands", "tags", "links", "aliases", "history"]}
+        con = connect_read_only(self.home)
+        try:
+            tables = ["notes", "projects", "people", "repositories", "commands", "tags", "links", "aliases", "history"]
+            return {table: con.execute(f"SELECT COUNT(*) AS c FROM {table}").fetchone()["c"] for table in tables}
+        finally:
+            con.close()
+
+    def session_context_read_only(self, project: str, limit: int = 12, max_bytes: int = SESSION_CONTEXT_DEFAULT_MAX_BYTES) -> str:
+        return self._session_context(project, limit=limit, max_bytes=max_bytes)
 
     def reset_usage_stats(self) -> int:
         return reset_events(self.home)
@@ -145,9 +183,35 @@ class Memory:
             "indexed": indexed,
         }
 
-    def add(self, note: NoteInput, actor: str = "local", reason: str = "manual add") -> Path:
+    def add(
+        self,
+        note: NoteInput,
+        actor: str = "local",
+        reason: str = "manual add",
+        allow_credentials: bool = False,
+    ) -> Path:
         if note.type not in TYPE_FOLDERS:
             raise ValueError(f"Unsupported type: {note.type}. Known types: {', '.join(OBJECT_TYPES)}")
+        guard_credentials(
+            [
+                note.title,
+                note.project,
+                note.text,
+                note.source,
+                note.parent,
+                json.dumps(
+                    {
+                        "tags": note.tags,
+                        "related": note.related,
+                        "aliases": note.aliases,
+                        "extra_meta": note.extra_meta,
+                    },
+                    ensure_ascii=False,
+                    default=str,
+                ),
+            ],
+            allow_credentials=allow_credentials,
+        )
         note_id = uuid_text()
         stamp = now_text()
         folder = self.home / TYPE_FOLDERS[note.type]
@@ -178,7 +242,12 @@ class Memory:
         con.close()
         return path
 
-    def learn(self, learning: TaskLearningInput, telemetry: bool = True) -> Path:
+    def learn(
+        self,
+        learning: TaskLearningInput,
+        telemetry: bool = True,
+        allow_credentials: bool = False,
+    ) -> Path:
         """Persist a structured task-completion memory and refresh SQLite indexes."""
         started = perf_counter()
         if telemetry:
@@ -187,6 +256,7 @@ class Memory:
         title = f"Task learned: {learning.goal}"
         tags = split_tags(["task-learning", "agent-learning", *learning.tags])
         body = self._render_learning_body(learning)
+        guard_credentials([title, body], allow_credentials=allow_credentials)
         path = self.add(
             NoteInput(
                 title=title,
@@ -210,6 +280,7 @@ class Memory:
             ),
             actor=learning.actor,
             reason="task learning",
+            allow_credentials=allow_credentials,
         )
         con = self.connect()
         row = con.execute("SELECT id FROM notes WHERE path = ?", (str(path.relative_to(self.home)),)).fetchone()
@@ -252,6 +323,7 @@ class Memory:
         paths: list[str | Path] | None = None,
         days: int | None = None,
         dry_run: bool = False,
+        allow_credentials: bool = False,
     ) -> dict[str, object]:
         """Import Codex Work pending JSON records from configured project roots."""
         if days is not None and days < 0:
@@ -297,11 +369,15 @@ class Memory:
                     continue
                 payload = json.loads(path.read_text(encoding="utf-8"))
                 learning = self._learning_from_pending_payload(payload, path, roots)
+                guard_credentials(
+                    [learning.goal, self._render_learning_body(learning)],
+                    allow_credentials=allow_credentials,
+                )
                 if dry_run:
                     item["status"] = "would_import"
                     item["project"] = learning.project
                     continue
-                note_path = self.learn(learning)
+                note_path = self.learn(learning, allow_credentials=allow_credentials)
                 note_id = self._note_id_for_path(note_path)
                 if not note_id:
                     raise RuntimeError("saved note was not found in the SQLite index")
@@ -326,6 +402,16 @@ class Memory:
                 report["archived"] = int(report["archived"]) + 1
                 item["status"] = "imported"
                 item["note"] = str(note_path)
+            except CredentialDetectedError as exc:
+                report["skipped"] = int(report["skipped"]) + 1
+                item["status"] = "credential_blocked"
+                item["error"] = str(exc)
+                self._telemetry_event(
+                    "learning_skipped",
+                    project=item.get("project", ""),
+                    source="pending-import",
+                    reason="credential_detected",
+                )
             except Exception as exc:
                 report["errors"] = int(report["errors"]) + 1
                 item["status"] = "error"
@@ -527,6 +613,7 @@ class Memory:
         draft: bool = True,
         outcome: str = "",
         findings: list[str] | None = None,
+        allow_credentials: bool = False,
     ) -> LearningSaveResult | SessionLearningPreview:
         """Collect local session context, then persist it through learn()."""
         started = perf_counter()
@@ -561,6 +648,27 @@ class Memory:
             source=source,
             outcome=preview.learning.outcome,
         )
+        try:
+            guard_credentials(
+                [preview.learning.goal, self._render_learning_body(preview.learning)],
+                allow_credentials=allow_credentials,
+            )
+        except CredentialDetectedError as exc:
+            self._telemetry_event(
+                "learning_skipped",
+                project=preview.learning.project,
+                actor=actor,
+                source=source,
+                outcome=preview.learning.outcome,
+                reason="credential_detected",
+                duration_ms=self._duration_ms(started),
+            )
+            return LearningSaveResult(
+                "credential_blocked",
+                str(exc),
+                quality_score=preview.learning.quality_score,
+                reason="credential_detected",
+            )
         if preview.disposition == "skip":
             try:
                 event = self._curator_event_for_skip(preview)
@@ -580,7 +688,11 @@ class Memory:
             return LearningSaveResult("skipped", f"skipped: {preview.reason}", quality_score=preview.learning.quality_score, reason=preview.reason)
         try:
             if preview.disposition == "draft" and draft:
-                path = self.save_draft(preview.learning, reason=preview.reason)
+                path = self.save_draft(
+                    preview.learning,
+                    reason=preview.reason,
+                    allow_credentials=allow_credentials,
+                )
                 self._record_curator_event("curator_saved_draft", preview.learning, preview.reason, path=str(path))
                 verification = self._verify_session_save(path, preview.learning, draft=True)
                 if not verification["ok"]:
@@ -589,7 +701,11 @@ class Memory:
                     return result
                 self._telemetry_event("learning_saved", project=preview.learning.project, actor=actor, source=source, outcome=preview.learning.outcome, note_id=self._note_id_for_path(path) or "", disposition="draft", duration_ms=self._duration_ms(started))
                 return LearningSaveResult("draft", f"saved as draft: {path}\nverified: yes", str(path), preview.learning.quality_score, preview.reason, verification)
-            path = self.learn(preview.learning, telemetry=False)
+            path = self.learn(
+                preview.learning,
+                telemetry=False,
+                allow_credentials=allow_credentials,
+            )
             note_id = self._note_id_for_path(path)
             self._record_curator_event("curator_saved_permanent", preview.learning, preview.reason, note_id, str(path))
             verification = self._verify_session_save(path, preview.learning)
@@ -757,7 +873,7 @@ class Memory:
             reasons.append("temporary/runtime project -5")
         return score, "; ".join(reasons) or "neutral"
 
-    def save_draft(self, learning: TaskLearningInput, reason: str = "") -> Path:
+    def save_draft(self, learning: TaskLearningInput, reason: str = "", allow_credentials: bool = False) -> Path:
         draft_dir = self.home / "_system" / "drafts"
         draft_dir.mkdir(parents=True, exist_ok=True)
         stamp = now_text()
@@ -785,6 +901,7 @@ class Memory:
             "curator_fingerprint": learning.curator_fingerprint,
         }
         body = self._render_learning_body(learning)
+        guard_credentials([learning.goal, body], allow_credentials=allow_credentials)
         path = self._unique_path(draft_dir, learning.goal)
         path.write_text(build_markdown(meta, body), encoding="utf-8")
         return path
@@ -807,7 +924,7 @@ class Memory:
             })
         return drafts
 
-    def promote_draft(self, draft_id: str) -> Path:
+    def promote_draft(self, draft_id: str, allow_credentials: bool = False) -> Path:
         path = self._find_draft(draft_id)
         if not path:
             raise FileNotFoundError(f"Draft not found: {draft_id}")
@@ -815,6 +932,10 @@ class Memory:
         meta["status"] = "active"
         meta["type"] = "session"
         meta["title"] = str(meta.get("title") or "Draft learned").replace("Draft learned:", "Task learned:", 1)
+        guard_credentials(
+            [str(meta.get("title") or ""), content, json.dumps(meta, ensure_ascii=False, default=str)],
+            allow_credentials=allow_credentials,
+        )
         folder = self.home / TYPE_FOLDERS["session"]
         folder.mkdir(parents=True, exist_ok=True)
         target = self._unique_path(folder, str(meta["title"]))
@@ -849,15 +970,34 @@ class Memory:
             quality_score=int(meta.get("quality_score") or 0),
         )
 
-    def learn_from_github_pr(self, url: str, actor: str = "agent", source: str = "github") -> LearningSaveResult:
+    def learn_from_github_pr(
+        self,
+        url: str,
+        actor: str = "agent",
+        source: str = "github",
+        allow_credentials: bool = False,
+    ) -> LearningSaveResult:
         if not shutil.which("gh"):
             return LearningSaveResult("skipped", "skipped: GitHub CLI 'gh' not found", reason="gh not found")
         data, error = self._gh_pr_view(url)
         if error:
             return LearningSaveResult("skipped", f"skipped: {error}", reason=error)
-        return self.upsert_github_pr(data, url=url, actor=actor, source=source)
+        return self.upsert_github_pr(
+            data,
+            url=url,
+            actor=actor,
+            source=source,
+            allow_credentials=allow_credentials,
+        )
 
-    def upsert_github_pr(self, data: dict[str, object], url: str, actor: str = "agent", source: str = "github") -> LearningSaveResult:
+    def upsert_github_pr(
+        self,
+        data: dict[str, object],
+        url: str,
+        actor: str = "agent",
+        source: str = "github",
+        allow_credentials: bool = False,
+    ) -> LearningSaveResult:
         """Create or enrich the single canonical note for a GitHub PR."""
         repo = self._normalize_github_repository(str(data.get("repository") or self._repo_from_pr_url(url)))
         number = str(data.get("number") or "")
@@ -932,13 +1072,24 @@ class Memory:
             )
         existing = self._find_note_by_identity(identity_key, "github_pr_learning")
         if not existing:
-            path = self.add(note, actor=actor, reason="github pr learning")
+            path = self.add(
+                note,
+                actor=actor,
+                reason="github pr learning",
+                allow_credentials=allow_credentials,
+            )
             self._record_note_history(path, "github_pr_created", actor, "GitHub PR created", {"identity_key": identity_key, "status": lifecycle})
             return LearningSaveResult("permanent", f"saved to permanent memory: {path}", str(path), quality_score, "github pr")
         path, meta, previous = existing
         old_status = str(meta.get("status") or "")
         merged_body = body if body in previous else body + "\n## Previous Capture\n\n" + previous.rstrip() + "\n"
-        updated = self._update_note(path, meta, note, merged_body)
+        updated = self._update_note(
+            path,
+            meta,
+            note,
+            merged_body,
+            allow_credentials=allow_credentials,
+        )
         if old_status != lifecycle or body not in previous:
             self._record_note_history(updated, "github_pr_updated", actor, "GitHub PR updated", {"identity_key": identity_key, "previous_status": old_status, "status": lifecycle})
         return LearningSaveResult("permanent", f"updated permanent memory: {updated}", str(updated), quality_score, "github pr upsert")
@@ -1012,6 +1163,7 @@ class Memory:
         report: dict[str, object],
         actor: str = "agent",
         source: str = "oss-scout",
+        allow_credentials: bool = False,
     ) -> LearningSaveResult:
         """Create or enrich one structured memory for an OSS issue candidate."""
         repository = self._normalize_github_repository(str(report.get("repository") or ""))
@@ -1065,11 +1217,22 @@ class Memory:
             },
         )
         if not existing:
-            path = self.add(note, actor=actor, reason="oss candidate upsert")
+            path = self.add(
+                note,
+                actor=actor,
+                reason="oss candidate upsert",
+                allow_credentials=allow_credentials,
+            )
             self._record_note_history(path, "oss_candidate_created", actor, "OSS candidate created", {"identity_key": identity_key, "verdict": verdict})
             return LearningSaveResult("permanent", f"saved to permanent memory: {path}", str(path), 0, "oss candidate")
         path, meta, previous = existing
-        updated = self._update_note(path, meta, note, body if body != previous else previous)
+        updated = self._update_note(
+            path,
+            meta,
+            note,
+            body if body != previous else previous,
+            allow_credentials=allow_credentials,
+        )
         self._record_note_history(updated, "oss_candidate_updated", actor, "OSS candidate updated", {"identity_key": identity_key, "verdict": verdict})
         return LearningSaveResult("permanent", f"updated permanent memory: {updated}", str(updated), 0, "oss candidate upsert")
 
@@ -1092,7 +1255,14 @@ class Memory:
                 return path, meta, content
         return None
 
-    def _update_note(self, path: Path, previous_meta: dict[str, object], note: NoteInput, content: str) -> Path:
+    def _update_note(
+        self,
+        path: Path,
+        previous_meta: dict[str, object],
+        note: NoteInput,
+        content: str,
+        allow_credentials: bool = False,
+    ) -> Path:
         meta = dict(previous_meta)
         meta.update({
             "title": note.title,
@@ -1111,6 +1281,10 @@ class Memory:
                 meta[key] = value
         meta["id"] = str(previous_meta.get("id") or uuid_text())
         meta["created"] = str(previous_meta.get("created") or now_text())
+        guard_credentials(
+            [str(meta.get("title") or ""), content, json.dumps(meta, ensure_ascii=False, default=str)],
+            allow_credentials=allow_credentials,
+        )
         path.write_text(build_markdown(meta, content), encoding="utf-8")
         con = self.connect()
         self._upsert_path(con, path)
@@ -1369,7 +1543,7 @@ class Memory:
         con.close()
         return report
 
-    def import_path(self, path: Path, project: str = "") -> int:
+    def import_path(self, path: Path, project: str = "", allow_credentials: bool = False) -> int:
         path = path.expanduser().resolve()
         if not path.exists():
             raise FileNotFoundError(path)
@@ -1399,14 +1573,17 @@ class Memory:
                     ),
                     actor="importer",
                     reason="filesystem import",
+                    allow_credentials=allow_credentials,
                 )
                 imported += 1
+            except CredentialDetectedError:
+                raise
             except Exception as exc:  # noqa: BLE001
                 log_error(self.home, f"import failed for {source_path}: {exc}")
         return imported
 
-    def import_repo(self, path: str | Path, project: str = "") -> int:
-        return self.import_path(Path(path), project=project)
+    def import_repo(self, path: str | Path, project: str = "", allow_credentials: bool = False) -> int:
+        return self.import_path(Path(path), project=project, allow_credentials=allow_credentials)
 
     def digest(self) -> str:
         today = date_stamp()

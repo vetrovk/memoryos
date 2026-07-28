@@ -148,6 +148,32 @@ memory used <note-id> --project my-project --reason "Applied the release convent
 
 Set `MEMORYOS_TELEMETRY=0` to disable event collection. Remove it with `memory stats --reset --yes`. These metrics measure lookup, opening, and deliberate reported use only. They do not prove that a result improved a decision, saved tokens, or increased engineering quality.
 
+### Optional MCP server
+
+MemoryOS can expose four bounded read-only tools to MCP clients over stdio: `search_memory`, `get_project_context`, `open_memory`, and `get_memory_stats`. It has no write tools, HTTP server, daemon, or network calls.
+
+The optional MCP extra requires Python 3.10 or newer; the base MemoryOS package remains compatible with Python 3.9.
+
+```bash
+python -m pip install "memoryos-local[mcp]"
+memory mcp serve
+```
+
+Example MCP client configuration:
+
+```json
+{
+  "mcpServers": {
+    "memoryos": {
+      "command": "memory",
+      "args": ["mcp", "serve"]
+    }
+  }
+}
+```
+
+Use an installed virtual-environment command or its absolute path in the client configuration. MCP output omits memory-home paths and is capped by tool limits.
+
 ## Examples
 
 ### Search a saved decision
