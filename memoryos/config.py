@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import json
+from datetime import datetime
 from pathlib import Path
 
 
@@ -82,6 +83,11 @@ def database_path(home: Path) -> Path:
 
 def log_path(home: Path) -> Path:
     return home / "_system" / "logs" / "memory.log"
+
+
+def events_path(home: Path, stamp: str | None = None) -> Path:
+    month = stamp or datetime.now().strftime("%Y-%m")
+    return home / "_system" / "events" / f"events-{month}.jsonl"
 
 
 DEFAULT_CURATOR_CONFIG = {

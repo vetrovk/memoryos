@@ -43,6 +43,8 @@ Do not edit tracked files or create a commit until the lookup gate completes. It
 
 In commentary, report exactly one outcome: `MemoryOS lookup: found <note title or id>; applying <constraint>.`, `MemoryOS lookup: no relevant records for <terms>.`, or `MemoryOS lookup: unavailable: <reason>.`
 
+If a found note actually changes a decision, constraint, commit, or implementation, record that deliberate use with `memory used <note-id> --project <project> --reason "<short reason>"`. Do not record `memory used` for a result that was only viewed.
+
 ## Rules
 
 - Do not send personal, health, or work memory data to external APIs.

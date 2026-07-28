@@ -37,7 +37,12 @@ def build_parser() -> argparse.ArgumentParser:
     add_home(sub.add_parser("index"))
     add_home(sub.add_parser("digest"))
     add_home(sub.add_parser("doctor"))
-    add_home(sub.add_parser("stats"))
+    stats = add_home(sub.add_parser("stats", help="Show local usage statistics."))
+    stats.add_argument("--days", type=int, default=None)
+    stats.add_argument("--project", default="")
+    stats.add_argument("--json", action="store_true")
+    stats.add_argument("--reset", action="store_true", help="Delete local usage event files; requires --yes.")
+    stats.add_argument("--yes", action="store_true", help="Confirm --reset.")
     add_home(sub.add_parser("graph"))
     curator_stats = add_home(sub.add_parser("curator-stats"))
     curator_stats.add_argument("--days", type=int, default=None)
@@ -77,6 +82,14 @@ def build_parser() -> argparse.ArgumentParser:
     add.add_argument("--parent", default="")
     add.add_argument("--related", default="")
     add.add_argument("--aliases", default="")
+
+    open_note = add_home(sub.add_parser("open", help="Open a saved note by id."))
+    open_note.add_argument("note_id")
+
+    used = add_home(sub.add_parser("used", help="Record that a note influenced the current work."))
+    used.add_argument("note_id")
+    used.add_argument("--project", default="")
+    used.add_argument("--reason", required=True)
 
     search = add_home(sub.add_parser("search"))
     search.add_argument("query_pos", nargs="?", default="")
@@ -177,6 +190,22 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(f"Added: {path}")
         return 0
+    if args.command == "open":
+        try:
+            meta, body = memory.open_note(args.note_id)
+        except ValueError as exc:
+            parser.error(str(exc))
+        print(f"# {meta.get('title', args.note_id)}")
+        print()
+        print(body, end="" if body.endswith("\n") else "\n")
+        return 0
+    if args.command == "used":
+        try:
+            memory.mark_note_used(args.note_id, project=args.project, reason=args.reason)
+        except ValueError as exc:
+            parser.error(str(exc))
+        print(f"Recorded use: {args.note_id}")
+        return 0
     if args.command == "search":
         query = args.query or args.query_pos
         if args.cwd and args.project:
@@ -260,8 +289,19 @@ def main(argv: list[str] | None = None) -> int:
         print(report, end="")
         return 0 if ok else 1
     if args.command == "stats":
-        for key, value in memory.stats().items():
-            print(f"{key}: {value}")
+        if args.reset:
+            if not args.yes:
+                parser.error("memory stats --reset requires --yes")
+            print(f"Reset local usage event files: {memory.reset_usage_stats()}")
+            return 0
+        try:
+            report = memory.usage_stats(days=args.days, project=args.project)
+        except ValueError as exc:
+            parser.error(str(exc))
+        if args.json:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+        else:
+            print(_render_usage_stats(report))
         return 0
     if args.command == "graph":
         print(memory.graph(), end="")
@@ -410,6 +450,39 @@ def _as_list(value: object) -> list[str]:
     if isinstance(value, str):
         return split_tags(value)
     return [str(value)]
+
+
+def _render_usage_stats(report: dict[str, object]) -> str:
+    period = report["period"]
+    lookups = report["lookups"]
+    notes = report["notes"]
+    learning = report["learning"]
+    assert isinstance(period, dict)
+    assert isinstance(lookups, dict)
+    assert isinstance(notes, dict)
+    assert isinstance(learning, dict)
+    lines = ["# MemoryOS local usage statistics", ""]
+    period_label = "all time" if period["days"] is None else f"last {period['days']} days"
+    lines.append(f"Period: {period_label}")
+    lines.append(f"Project: {period['project'] or 'all projects'}")
+    lines.extend(["", "## Lookups"])
+    lines.append(f"Total: {lookups['total']} | found: {lookups['found']} | empty: {lookups['empty']} | unavailable: {lookups['unavailable']} | errors: {lookups['errors']}")
+    lines.append(f"Hit rate: {lookups['hit_rate']}% | average: {lookups['average_duration_ms']} ms | p95: {lookups['p95_duration_ms']} ms")
+    lines.extend(["", "## Notes"])
+    lines.append(f"Opened: {notes['opened']} | applied: {notes['used']} | unique notes opened repeatedly: {notes['unique_opened_repeatedly']}")
+    lines.extend(["", "## Learning"])
+    lines.append(f"Attempted: {learning['attempted']} | saved: {learning['saved']} | skipped: {learning['skipped']} | failed: {learning['failed']}")
+    lines.extend(["", "## Top projects"])
+    projects = report["top_projects"]
+    assert isinstance(projects, list)
+    lines.extend([f"- {item['project']}: {item['events']} events" for item in projects] or ["- None"])
+    lines.extend(["", "## Most reused notes"])
+    reused = notes["most_reused"]
+    assert isinstance(reused, list)
+    lines.extend([f"- {item['note_id']} | {item['title'] or '-'} | {item['opens']} opens" for item in reused] or ["- None"])
+    if report["corrupted_events_skipped"]:
+        lines.extend(["", f"Corrupted events skipped: {report['corrupted_events_skipped']}"])
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":

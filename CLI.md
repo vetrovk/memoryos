@@ -37,6 +37,10 @@ memory digest
 memory doctor
 memory rebuild
 memory stats
+memory stats --days 7
+memory stats --project oracle --json
+memory open <note-id>
+memory used <note-id> --project oracle --reason "Applied the deployment rule"
 memory graph
 memory agents audit --path ~/Documents --path ~/projects
 memory agents sync --dry-run --path ~/Documents --path ~/projects
@@ -51,6 +55,29 @@ memory init
 Initializes an empty memory home with the required folders and local SQLite index. It does not add example notes, user records, or demo search results. Running it again preserves existing Markdown notes and rebuilds the derived index without overwriting user data.
 
 See [examples/example-decision.md](examples/example-decision.md) for a standalone note-format example. It is not installed into a memory home.
+
+## `memory stats`
+
+```bash
+memory stats
+memory stats --days 7
+memory stats --days 30 --project oracle
+memory stats --json
+memory stats --reset --yes
+```
+
+Shows local usage events from `_system/events/events-YYYY-MM.jsonl`: lookup status and duration, opened notes, deliberate note use, and session-learning outcomes. The JSONL files are local only and are not sent to a network destination. Set `MEMORYOS_TELEMETRY=0` to disable collection. Queries are normalized and obvious credentials, tokens, and long secret-like values are redacted; note bodies, prompts, and agent responses are never stored in these events.
+
+`--reset` deletes only local event files and requires `--yes`. Statistics measure observed usage, not token savings or the quality of a resulting engineering decision.
+
+## `memory open` and `memory used`
+
+```bash
+memory open <note-id>
+memory used <note-id> --project oracle --reason "Applied the deployment rule"
+```
+
+`open` displays a note and records that it was opened. Use `used` only when the note actually influenced a decision, constraint, commit, or implementation. A search result that was merely viewed must not be marked as used.
 
 ## `memory agents`
 

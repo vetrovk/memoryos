@@ -2,6 +2,14 @@
 
 All notable public changes to MemoryOS are documented here.
 
+## [0.4.0] - 2026-07-28
+
+### Added
+
+- Local-only monthly JSONL usage events for lookup, note opening, deliberate note use, and session-learning outcomes.
+- `memory stats` filters local usage by day or project and supports JSON output and confirmed reset.
+- `memory open <note-id>` and `memory used <note-id>` distinguish opened records from records that actually influenced work.
+
 ## [0.3.0] - 2026-07-28
 
 ### Added

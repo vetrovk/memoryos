@@ -58,6 +58,8 @@ memory agents sync --dry-run --path ~/Documents --path ~/projects
 
 With the global instructions installed, Codex performs a required lookup before substantive changes and commits, reports the lookup outcome in commentary, and saves useful local experience after completed work. The local summary must not include credentials, secrets, or full private file contents.
 
+When a retrieved note actually affects a decision or implementation, Codex can record that deliberate use with `memory used <note-id> --project <project> --reason "<short reason>"`. Viewing a result alone is not counted as use.
+
 For more detail, continue with the [examples](#examples), [CLI reference](CLI.md), [architecture](ARCHITECTURE.md), and [privacy notes](PRIVACY.md) below. The repository contains the engine only; keep your actual memory folder outside it.
 
 ## More detail
@@ -131,6 +133,19 @@ memory search --cwd "$(git rev-parse --show-toplevel)" --query "release notes"
 Session context is opt-in. It uses existing project memory only, writes nothing, starts no hooks or background process, and reports its actual UTF-8 size and truncation state. After a permanent `memory learn --from-session` save, MemoryOS verifies the Markdown file, metadata, SQLite index, and normal search retrieval before reporting success.
 
 If `memory learn --from-session` cannot write the configured memory home because of a readonly database or sandbox boundary, it automatically saves a Codex Work JSON record in `.memoryos_pending/` inside the current project and prints its path. A successful fallback means the pending payload was saved, not that the sandbox wrote directly to the main memory home. Keep the JSON in place until `memory import-pending --path <project-root>` reports success; imported files are archived beside their source. MemoryOS does not send this data to a cloud service.
+
+### Local usage statistics
+
+MemoryOS records small local usage events in `<memory-home>/_system/events/events-YYYY-MM.jsonl` by default. With the default home, that is `~/Memory/_system/events/`. They include command type, project, normalized query, result count, note IDs and titles returned or opened, learning disposition, and durations. They never include note bodies, prompts, agent answers, credentials, or network transmission.
+
+```bash
+memory stats --days 7
+memory stats --project my-project --json
+memory open <note-id>
+memory used <note-id> --project my-project --reason "Applied the release convention"
+```
+
+Set `MEMORYOS_TELEMETRY=0` to disable event collection. Remove it with `memory stats --reset --yes`. These metrics measure lookup, opening, and deliberate reported use only. They do not prove that a result improved a decision, saved tokens, or increased engineering quality.
 
 ## Examples
 

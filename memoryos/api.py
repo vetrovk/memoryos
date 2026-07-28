@@ -7,6 +7,7 @@ import sqlite3
 import subprocess
 import hashlib
 import shutil
+from time import perf_counter
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -24,6 +25,7 @@ from .config import (
 from .models import LearningSaveResult, NoteInput, SearchResult, SessionLearningPreview, TaskLearningInput
 from .search import SQLiteFTSSearchProvider
 from .storage import add_history, connect, connect_read_only, ensure_dirs, init_db, log_error
+from .telemetry import normalize_query, record_event, reset_events, usage_summary
 from .util import build_markdown, date_stamp, now_text, read_markdown, short_snippet, slugify, split_tags, uuid_text
 
 
@@ -73,6 +75,63 @@ class Memory:
         remote = self._git_output(["remote", "get-url", "origin"], repo_dir).strip()
         return repo_dir, self._detect_project_name(repo_dir, remote)
 
+    def usage_stats(self, days: int | None = None, project: str = "") -> dict[str, object]:
+        return usage_summary(self.home, days=days, project=project)
+
+    def reset_usage_stats(self) -> int:
+        return reset_events(self.home)
+
+    def mark_note_used(self, note_id: str, project: str = "", reason: str = "") -> None:
+        row = self._note_row(note_id)
+        if row is None:
+            raise ValueError(f"Note not found: {note_id}")
+        self._telemetry_event(
+            "note_used",
+            project=project or str(row["project"] or ""),
+            note_id=note_id,
+            title=str(row["title"]),
+            reason=normalize_query(reason, limit=160),
+        )
+
+    def open_note(self, note_id: str) -> tuple[dict[str, object], str]:
+        started = perf_counter()
+        row = self._note_row(note_id)
+        if row is None:
+            raise ValueError(f"Note not found: {note_id}")
+        path = self.home / str(row["path"])
+        try:
+            meta, body = read_markdown(path)
+        except OSError as exc:
+            self._telemetry_event("lookup_completed", command="open", project=str(row["project"] or ""), status="error", duration_ms=self._duration_ms(started))
+            raise ValueError(f"Could not read note: {exc}") from exc
+        self._telemetry_event(
+            "note_opened",
+            project=str(row["project"] or ""),
+            note_id=note_id,
+            title=str(row["title"]),
+            duration_ms=self._duration_ms(started),
+        )
+        return meta, body
+
+    def _note_row(self, note_id: str) -> sqlite3.Row | None:
+        con = self.connect()
+        row = con.execute("SELECT id, path, title, project FROM notes WHERE id = ?", (note_id,)).fetchone()
+        con.close()
+        return row
+
+    def _project_note_count(self, project: str) -> int:
+        con = self.connect()
+        count = int(con.execute("SELECT COUNT(*) AS c FROM notes WHERE lower(project) = lower(?)", (project,)).fetchone()["c"])
+        con.close()
+        return count
+
+    def _telemetry_event(self, event_type: str, **payload: object) -> None:
+        record_event(self.home, event_type, payload)
+
+    @staticmethod
+    def _duration_ms(started: float) -> int:
+        return max(0, round((perf_counter() - started) * 1000))
+
     def init(self) -> dict[str, int | str]:
         ensure_dirs(self.home)
         con = self.connect()
@@ -119,8 +178,11 @@ class Memory:
         con.close()
         return path
 
-    def learn(self, learning: TaskLearningInput) -> Path:
+    def learn(self, learning: TaskLearningInput, telemetry: bool = True) -> Path:
         """Persist a structured task-completion memory and refresh SQLite indexes."""
+        started = perf_counter()
+        if telemetry:
+            self._telemetry_event("learning_attempted", project=learning.project, actor=learning.actor, source=learning.source, outcome=learning.outcome)
         self._normalize_learning_status(learning)
         title = f"Task learned: {learning.goal}"
         tags = split_tags(["task-learning", "agent-learning", *learning.tags])
@@ -173,6 +235,16 @@ class Memory:
                 )
         con.commit()
         con.close()
+        if telemetry:
+            self._telemetry_event(
+                "learning_saved",
+                project=learning.project,
+                actor=learning.actor,
+                source=learning.source,
+                outcome=learning.outcome,
+                note_id=note_id or "",
+                duration_ms=self._duration_ms(started),
+            )
         return path
 
     def import_pending(
@@ -457,18 +529,38 @@ class Memory:
         findings: list[str] | None = None,
     ) -> LearningSaveResult | SessionLearningPreview:
         """Collect local session context, then persist it through learn()."""
-        preview = self.collect_session_learning(
-            project=project,
-            actor=actor,
-            source=source,
-            cwd=cwd,
-            test_results=test_results,
-            goal=goal,
-            outcome=outcome,
-            findings=findings or [],
-        )
+        started = perf_counter()
+        try:
+            preview = self.collect_session_learning(
+                project=project,
+                actor=actor,
+                source=source,
+                cwd=cwd,
+                test_results=test_results,
+                goal=goal,
+                outcome=outcome,
+                findings=findings or [],
+            )
+        except Exception as exc:
+            self._telemetry_event(
+                "learning_failed",
+                project=project,
+                actor=actor,
+                source=source,
+                outcome=outcome,
+                error=type(exc).__name__,
+                duration_ms=self._duration_ms(started),
+            )
+            raise
         if dry_run:
             return preview
+        self._telemetry_event(
+            "learning_attempted",
+            project=preview.learning.project,
+            actor=actor,
+            source=source,
+            outcome=preview.learning.outcome,
+        )
         if preview.disposition == "skip":
             try:
                 event = self._curator_event_for_skip(preview)
@@ -476,6 +568,15 @@ class Memory:
             except (sqlite3.OperationalError, OSError) as exc:
                 if not self._is_direct_write_unavailable(exc):
                     raise
+            self._telemetry_event(
+                "learning_skipped",
+                project=preview.learning.project,
+                actor=actor,
+                source=source,
+                outcome=preview.learning.outcome,
+                reason=preview.reason,
+                duration_ms=self._duration_ms(started),
+            )
             return LearningSaveResult("skipped", f"skipped: {preview.reason}", quality_score=preview.learning.quality_score, reason=preview.reason)
         try:
             if preview.disposition == "draft" and draft:
@@ -483,14 +584,20 @@ class Memory:
                 self._record_curator_event("curator_saved_draft", preview.learning, preview.reason, path=str(path))
                 verification = self._verify_session_save(path, preview.learning, draft=True)
                 if not verification["ok"]:
-                    return self._verification_failure(path, preview.learning, verification)
+                    result = self._verification_failure(path, preview.learning, verification)
+                    self._telemetry_event("learning_failed", project=preview.learning.project, actor=actor, source=source, outcome=preview.learning.outcome, error=result.reason, duration_ms=self._duration_ms(started))
+                    return result
+                self._telemetry_event("learning_saved", project=preview.learning.project, actor=actor, source=source, outcome=preview.learning.outcome, note_id=self._note_id_for_path(path) or "", disposition="draft", duration_ms=self._duration_ms(started))
                 return LearningSaveResult("draft", f"saved as draft: {path}\nverified: yes", str(path), preview.learning.quality_score, preview.reason, verification)
-            path = self.learn(preview.learning)
+            path = self.learn(preview.learning, telemetry=False)
             note_id = self._note_id_for_path(path)
             self._record_curator_event("curator_saved_permanent", preview.learning, preview.reason, note_id, str(path))
             verification = self._verify_session_save(path, preview.learning)
             if not verification["ok"]:
-                return self._verification_failure(path, preview.learning, verification)
+                result = self._verification_failure(path, preview.learning, verification)
+                self._telemetry_event("learning_failed", project=preview.learning.project, actor=actor, source=source, outcome=preview.learning.outcome, error=result.reason, duration_ms=self._duration_ms(started))
+                return result
+            self._telemetry_event("learning_saved", project=preview.learning.project, actor=actor, source=source, outcome=preview.learning.outcome, note_id=note_id or "", disposition="permanent", duration_ms=self._duration_ms(started))
             return LearningSaveResult(
                 "permanent",
                 f"saved to permanent memory: {path}\nindexed: yes\nsearchable: yes\nverified: yes",
@@ -501,8 +608,12 @@ class Memory:
             )
         except (sqlite3.OperationalError, OSError) as exc:
             if not self._is_direct_write_unavailable(exc):
+                self._telemetry_event("learning_failed", project=preview.learning.project, actor=actor, source=source, outcome=preview.learning.outcome, error=type(exc).__name__, duration_ms=self._duration_ms(started))
                 raise
-            return self._save_session_pending_fallback(preview, exc)
+            result = self._save_session_pending_fallback(preview, exc)
+            event_type = "learning_saved" if result.disposition == "pending" else "learning_failed"
+            self._telemetry_event(event_type, project=preview.learning.project, actor=actor, source=source, outcome=preview.learning.outcome, disposition=result.disposition, error=result.reason if event_type == "learning_failed" else "", duration_ms=self._duration_ms(started))
+            return result
 
     def collect_session_learning(
         self,
@@ -1186,9 +1297,34 @@ class Memory:
         return rows
 
     def search(self, query: str = "", project: str = "", tags: list[str] | None = None, note_type: str = "", limit: int = 10) -> list[SearchResult]:
-        con = self.connect()
-        results = SQLiteFTSSearchProvider(con, self.home).search(query=query, project=project, tags=tags, note_type=note_type, limit=limit)
-        con.close()
+        started = perf_counter()
+        safe_query = normalize_query(query)
+        self._telemetry_event("lookup_started", command="search", project=project, query=safe_query)
+        try:
+            con = self.connect()
+            results = SQLiteFTSSearchProvider(con, self.home).search(query=query, project=project, tags=tags, note_type=note_type, limit=limit)
+            con.close()
+        except Exception as exc:
+            self._telemetry_event(
+                "lookup_completed",
+                command="search",
+                project=project,
+                query=safe_query,
+                result_count=0,
+                duration_ms=self._duration_ms(started),
+                status="unavailable" if isinstance(exc, (sqlite3.OperationalError, OSError)) and self._is_direct_write_unavailable(exc) else "error",
+            )
+            raise
+        self._telemetry_event(
+            "lookup_completed",
+            command="search",
+            project=project,
+            query=safe_query,
+            result_count=len(results),
+            results=[{"id": item.id, "title": item.title} for item in results],
+            duration_ms=self._duration_ms(started),
+            status="found" if results else "empty",
+        )
         return results
 
     def rebuild(self) -> int:
@@ -1299,8 +1435,34 @@ class Memory:
         session: bool = False,
         max_bytes: int = SESSION_CONTEXT_DEFAULT_MAX_BYTES,
     ) -> Path | str:
+        started = perf_counter()
+        self._telemetry_event("lookup_started", command="context", project=project, query="")
         if session:
-            return self._session_context(project, limit=limit, max_bytes=max_bytes)
+            try:
+                result = self._session_context(project, limit=limit, max_bytes=max_bytes)
+                count = self._project_note_count(project)
+            except Exception as exc:
+                self._telemetry_event(
+                    "lookup_completed",
+                    command="context",
+                    project=project,
+                    query="",
+                    result_count=0,
+                    duration_ms=self._duration_ms(started),
+                    status="unavailable" if isinstance(exc, (sqlite3.OperationalError, OSError)) and self._is_direct_write_unavailable(exc) else "error",
+                )
+                raise
+            self._telemetry_event("context_loaded", project=project, result_count=count, duration_ms=self._duration_ms(started))
+            self._telemetry_event(
+                "lookup_completed",
+                command="context",
+                project=project,
+                query="",
+                result_count=count,
+                duration_ms=self._duration_ms(started),
+                status="found" if count else "empty",
+            )
+            return result
         con = self.connect()
         rows = con.execute("SELECT * FROM notes WHERE lower(project) = lower(?) ORDER BY updated DESC", (project,)).fetchall()
         sections = [
@@ -1344,6 +1506,16 @@ class Memory:
         export_dir.mkdir(parents=True, exist_ok=True)
         path = export_dir / f"context_{slugify(project, 'project')}_{date_stamp()}.md"
         path.write_text("\n".join(out).rstrip() + "\n", encoding="utf-8")
+        self._telemetry_event("context_loaded", project=project, result_count=len(rows), duration_ms=self._duration_ms(started))
+        self._telemetry_event(
+            "lookup_completed",
+            command="context",
+            project=project,
+            query="",
+            result_count=len(rows),
+            duration_ms=self._duration_ms(started),
+            status="found" if rows else "empty",
+        )
         return path
 
     def _session_context(self, project: str, limit: int, max_bytes: int) -> str:
@@ -1675,6 +1847,8 @@ Before substantive work that changes tracked files, project behavior, configurat
 Do not edit tracked files or create a commit until the lookup gate completes. It does not apply to simple read-only commands such as `pwd`, `git status`, or `memory --help`.
 
 In commentary, report exactly one outcome: `MemoryOS lookup: found <note title or id>; applying <constraint>.`, `MemoryOS lookup: no relevant records for <terms>.`, or `MemoryOS lookup: unavailable: <reason>.`
+
+If a found note actually changes a decision, constraint, commit, or implementation, record that deliberate use with `memory used <note-id> --project <project> --reason "<short reason>"`. Do not record `memory used` for a result that was only viewed.
 
 ## MemoryOS Workflow
 
