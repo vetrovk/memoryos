@@ -3,7 +3,7 @@ from setuptools import setup
 
 setup(
     name="memoryos-local",
-    version="0.2.1",
+    version="0.6.0",
     description="Local Markdown and SQLite engineering memory system.",
     python_requires=">=3.9",
     packages=["memoryos"],

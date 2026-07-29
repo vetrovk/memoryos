@@ -1,6 +1,6 @@
 # MemoryOS CLI
 
-This reference matches MemoryOS v0.5.1 Public Beta.
+This reference matches MemoryOS v0.6.0 Public Beta.
 
 Primary command:
 
@@ -26,6 +26,7 @@ memory import-pending --dry-run
 memory learn --from-session --actor codex --source codex
 memory drafts
 memory quarantine
+memory quarantine list
 memory github-pr https://github.com/owner/repo/pull/123
 memory github-pr-deduplicate --dry-run
 memory oss-candidate upsert --from-json candidate.json --actor codex --source oss-scout
@@ -211,16 +212,17 @@ memory import-pending --path "/path/to/projects" --allow-credentials
 
 ### Automated-capture quarantine
 
-`memory learn --from-session` and `memory import-pending` apply a small deterministic safety gate before Curator, deduplication, or SQLite indexing. It quarantines only high-confidence instruction-like patterns: direct instruction override, requests to expose secrets, attempts to control future agents, and requests to persist such rules. It is not an LLM classifier and does not scan or rewrite existing notes.
+`memory learn --from-session` and `memory import-pending` apply a small deterministic safety gate before Curator, deduplication, or SQLite indexing. It quarantines only high-confidence instruction-like patterns: direct instruction override, requests to expose secrets, attempts to control future agents, and requests to persist such rules. It is not an LLM classifier, is not a guarantee that every prompt injection will be detected, and does not scan or rewrite existing notes. Credential Guard runs first, so detected credentials are blocked rather than quarantined.
 
 ```bash
 memory quarantine
+memory quarantine list
 memory quarantine open <id>
 memory quarantine release <id>
 memory quarantine drop <id>
 ```
 
-Quarantined Markdown records live in `<memory-home>/_system/quarantine/`. They preserve the original local capture but are deliberately absent from `memory search`, `memory context`, and the read-only MCP tools. `open` is an explicit review action. `release` moves a reviewed record through the normal local learning write path; `drop` removes only that quarantine record. CLI status and telemetry record reason codes, never the matched text.
+Quarantined Markdown records live in `<memory-home>/_system/quarantine/`. They preserve the original local capture but are deliberately absent from `memory search`, `memory context`, and the read-only MCP tools. `open` is an explicit review action. `release` moves a reviewed record through the normal local learning write path; `drop` removes only that quarantine record. CLI status and telemetry record reason codes, never the matched text. The reason codes are `instruction_override`, `secret_exfiltration`, `future_agent_control`, and `persistent_malicious_rule`.
 
 The same flag is available for `memory add`, `memory import`, `memory github-pr`, `memory learn --from-github-pr`, `memory oss-candidate upsert`, and `memory drafts promote`. Existing notes are not scanned or rewritten automatically.
 

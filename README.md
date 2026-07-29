@@ -137,7 +137,19 @@ If `memory learn --from-session` cannot write the configured memory home because
 
 Before creating a permanent note, draft, or pending learning record, MemoryOS blocks high-confidence credential formats such as private keys, provider tokens, AWS access keys, and explicit secret assignments. The error identifies only the credential category. If storing such text locally is intentional, repeat the writing command with `--allow-credentials`. Existing notes are not scanned or changed automatically.
 
-Automated session learning and pending imports also quarantine a narrow set of high-confidence instruction-like captures before the Curator or SQLite index can process them. The gate looks for direct instruction override, secret-exfiltration, future-agent control, and persistent-rule patterns. It does not use an LLM and does not inspect existing notes retroactively. Quarantined records remain local in `<memory-home>/_system/quarantine/`, are excluded from normal search, session context, and the read-only MCP server, and can be reviewed explicitly with `memory quarantine`.
+Automated session learning and pending imports also quarantine a narrow set of high-confidence instruction-like captures before the Curator or SQLite index can process them. The gate looks for direct instruction override, secret-exfiltration, future-agent control, and persistent-rule patterns. It does not use an LLM and is not a guarantee that every prompt-injection attempt will be detected. It does not inspect existing notes retroactively. Credential Guard runs first, so captures containing detected credentials are blocked rather than quarantined.
+
+Quarantined records remain local in `<memory-home>/_system/quarantine/`, are excluded from normal search, session context, and the read-only MCP server. Review them explicitly:
+
+```bash
+memory quarantine
+memory quarantine list
+memory quarantine open <id>
+memory quarantine release <id>
+memory quarantine drop <id>
+```
+
+The safe reason codes are `instruction_override`, `secret_exfiltration`, `future_agent_control`, and `persistent_malicious_rule`. Telemetry records only the quarantine event and reason code, never the capture text or matched fragment.
 
 ### Local usage statistics
 
@@ -265,7 +277,7 @@ MemoryOS has no bulk-delete command. Archive or remove local Markdown notes with
 
 ## Current Status
 
-MemoryOS v0.5.1 is an actively used public beta. The command-line workflow and Markdown format are usable now; the Python API and note schema may still change before a stable 1.0 release. Bug reports and focused issues through GitHub Issues, plus small pull requests, are welcome.
+MemoryOS v0.6.0 is an actively used public beta. The command-line workflow and Markdown format are usable now; the Python API and note schema may still change before a stable 1.0 release. Bug reports and focused issues through GitHub Issues, plus small pull requests, are welcome.
 
 ## Development
 

@@ -2,6 +2,18 @@
 
 All notable public changes to MemoryOS are documented here.
 
+## [0.6.0] - 2026-07-29
+
+### Added
+
+- Deterministic, high-confidence quarantine for instruction-like captures from session learning and pending imports.
+- Explicit `memory quarantine` review, list, open, release, and drop commands.
+
+### Security
+
+- Quarantined captures remain local and are excluded from SQLite indexing, normal search, session context, and read-only MCP retrieval.
+- Quarantine telemetry records only a safe reason code; Credential Guard remains the first write-time protection layer.
+
 ## [0.5.1] - 2026-07-28
 
 ### Security
