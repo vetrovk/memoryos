@@ -8,7 +8,7 @@ import subprocess
 import hashlib
 import shutil
 from time import perf_counter
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
@@ -23,6 +23,7 @@ from .config import (
     pending_import_state_path,
 )
 from .credentials import CredentialDetectedError, guard_credentials
+from .instruction_safety import detect_instruction_like_content
 from .models import LearningSaveResult, NoteInput, SearchResult, SessionLearningPreview, TaskLearningInput
 from .search import SQLiteFTSSearchProvider
 from .storage import add_history, connect, connect_read_only, ensure_dirs, init_db, log_error
@@ -348,6 +349,7 @@ class Memory:
             "roots": [str(root) for root in roots],
             "found": 0,
             "imported": 0,
+            "quarantined": 0,
             "archived": 0,
             "skipped": 0,
             "errors": 0,
@@ -387,6 +389,40 @@ class Memory:
                     [learning.goal, self._render_learning_body(learning)],
                     allow_credentials=allow_credentials,
                 )
+                finding = detect_instruction_like_content(self._render_learning_body(learning))
+                if finding:
+                    item["reason"] = finding.reason
+                    if dry_run:
+                        item["status"] = "would_quarantine"
+                        continue
+                    quarantine_path = self.quarantine_learning(
+                        learning,
+                        reason=finding.reason,
+                        provenance="pending_import",
+                        allow_credentials=allow_credentials,
+                    )
+                    markers[digest] = {
+                        "state": "quarantined",
+                        "source_path": str(path),
+                        "quarantine_path": str(quarantine_path),
+                    }
+                    self._save_pending_import_markers(markers)
+                    archived_path = self._archive_pending_file(path, digest)
+                    markers[digest]["state"] = "archived"
+                    markers[digest]["archived_path"] = str(archived_path)
+                    self._save_pending_import_markers(markers)
+                    self._telemetry_event(
+                        "learning_quarantined",
+                        project=learning.project,
+                        actor=learning.actor,
+                        source="pending-import",
+                        outcome=learning.outcome,
+                        reason=finding.reason,
+                    )
+                    report["quarantined"] = int(report["quarantined"]) + 1
+                    report["archived"] = int(report["archived"]) + 1
+                    item["status"] = "quarantined"
+                    continue
                 if dry_run:
                     item["status"] = "would_import"
                     continue
@@ -652,7 +688,16 @@ class Memory:
                 duration_ms=self._duration_ms(started),
             )
             raise
+        body = self._render_learning_body(preview.learning)
+        finding = detect_instruction_like_content(body)
         if dry_run:
+            if finding:
+                return LearningSaveResult(
+                    "quarantined",
+                    f"would quarantine automated memory\nreason: {finding.reason}",
+                    quality_score=preview.learning.quality_score,
+                    reason=finding.reason,
+                )
             return preview
         self._telemetry_event(
             "learning_attempted",
@@ -663,7 +708,7 @@ class Memory:
         )
         try:
             guard_credentials(
-                [preview.learning.goal, self._render_learning_body(preview.learning)],
+                [preview.learning.goal, body],
                 allow_credentials=allow_credentials,
             )
         except CredentialDetectedError as exc:
@@ -681,6 +726,29 @@ class Memory:
                 str(exc),
                 quality_score=preview.learning.quality_score,
                 reason="credential_detected",
+            )
+        if finding:
+            path = self.quarantine_learning(
+                preview.learning,
+                reason=finding.reason,
+                provenance="session_learning",
+                allow_credentials=allow_credentials,
+            )
+            self._telemetry_event(
+                "learning_quarantined",
+                project=preview.learning.project,
+                actor=actor,
+                source=source,
+                outcome=preview.learning.outcome,
+                reason=finding.reason,
+                duration_ms=self._duration_ms(started),
+            )
+            return LearningSaveResult(
+                "quarantined",
+                f"saved to quarantine: {path}\nreason: {finding.reason}",
+                str(path),
+                preview.learning.quality_score,
+                finding.reason,
             )
         if preview.disposition == "skip":
             try:
@@ -936,6 +1004,98 @@ class Memory:
                 "path": str(path),
             })
         return drafts
+
+    def quarantine_learning(
+        self,
+        learning: TaskLearningInput,
+        reason: str,
+        provenance: str,
+        allow_credentials: bool = False,
+    ) -> Path:
+        """Store an automated capture outside the searchable memory index."""
+        body = self._render_learning_body(learning)
+        guard_credentials([learning.goal, body], allow_credentials=allow_credentials)
+        quarantine_dir = self.home / "_system" / "quarantine"
+        quarantine_dir.mkdir(parents=True, exist_ok=True)
+        stamp = now_text()
+        meta = {
+            "id": uuid_text(),
+            "title": "Quarantined automated memory",
+            "type": "session_quarantine",
+            "project": learning.project,
+            "status": "quarantined",
+            "tags": ["automated-ingestion", "quarantine"],
+            "created": stamp,
+            "updated": stamp,
+            "source": learning.source,
+            "parent": "",
+            "related": [],
+            "aliases": [],
+            "outcome": learning.outcome,
+            "quarantine_reason": reason,
+            "quarantine_provenance": provenance,
+            "quarantine_learning_json": json.dumps(asdict(learning), ensure_ascii=False),
+        }
+        path = self._unique_path(quarantine_dir, f"quarantine-{stamp}-{meta['id']}")
+        path.write_text(build_markdown(meta, body), encoding="utf-8")
+        return path
+
+    def list_quarantine(self) -> list[dict[str, str]]:
+        records: list[dict[str, str]] = []
+        for path in sorted((self.home / "_system" / "quarantine").glob("*.md")):
+            try:
+                meta, _ = read_markdown(path)
+            except (OSError, ValueError):
+                continue
+            records.append(
+                {
+                    "id": str(meta.get("id") or ""),
+                    "project": str(meta.get("project") or ""),
+                    "reason": str(meta.get("quarantine_reason") or ""),
+                    "provenance": str(meta.get("quarantine_provenance") or ""),
+                    "created": str(meta.get("created") or ""),
+                    "path": str(path),
+                }
+            )
+        return records
+
+    def open_quarantine(self, quarantine_id: str) -> tuple[dict[str, object], str]:
+        path = self._find_quarantine(quarantine_id)
+        if not path:
+            raise FileNotFoundError(f"Quarantine record not found: {quarantine_id}")
+        return read_markdown(path)
+
+    def release_quarantine(self, quarantine_id: str, allow_credentials: bool = False) -> Path:
+        path = self._find_quarantine(quarantine_id)
+        if not path:
+            raise FileNotFoundError(f"Quarantine record not found: {quarantine_id}")
+        meta, _ = read_markdown(path)
+        raw = meta.get("quarantine_learning_json")
+        try:
+            payload = json.loads(str(raw or ""))
+        except json.JSONDecodeError as exc:
+            raise ValueError("Quarantine record has invalid learning payload") from exc
+        if not isinstance(payload, dict):
+            raise ValueError("Quarantine record has invalid learning payload")
+        allowed = {field.name for field in fields(TaskLearningInput)}
+        learning = TaskLearningInput(**{key: value for key, value in payload.items() if key in allowed})
+        target = self.learn(learning, allow_credentials=allow_credentials)
+        self._record_curator_event(
+            "quarantine_released",
+            learning,
+            str(meta.get("quarantine_reason") or ""),
+            str(meta.get("id") or ""),
+            str(target),
+        )
+        path.unlink()
+        return target
+
+    def drop_quarantine(self, quarantine_id: str) -> Path:
+        path = self._find_quarantine(quarantine_id)
+        if not path:
+            raise FileNotFoundError(f"Quarantine record not found: {quarantine_id}")
+        path.unlink()
+        return path
 
     def promote_draft(self, draft_id: str, allow_credentials: bool = False) -> Path:
         path = self._find_draft(draft_id)
@@ -2742,6 +2902,17 @@ In commentary, report exactly one outcome: `MemoryOS lookup: found <note title o
             except Exception:
                 continue
             if str(meta.get("id") or "") == draft_id or path.name == draft_id or path.stem == draft_id:
+                return path
+        return None
+
+    def _find_quarantine(self, quarantine_id: str) -> Path | None:
+        quarantine_dir = self.home / "_system" / "quarantine"
+        for path in sorted(quarantine_dir.glob("*.md")):
+            try:
+                meta, _ = read_markdown(path)
+            except (OSError, ValueError):
+                continue
+            if str(meta.get("id") or "") == quarantine_id or path.name == quarantine_id or path.stem == quarantine_id:
                 return path
         return None
 

@@ -137,6 +137,8 @@ If `memory learn --from-session` cannot write the configured memory home because
 
 Before creating a permanent note, draft, or pending learning record, MemoryOS blocks high-confidence credential formats such as private keys, provider tokens, AWS access keys, and explicit secret assignments. The error identifies only the credential category. If storing such text locally is intentional, repeat the writing command with `--allow-credentials`. Existing notes are not scanned or changed automatically.
 
+Automated session learning and pending imports also quarantine a narrow set of high-confidence instruction-like captures before the Curator or SQLite index can process them. The gate looks for direct instruction override, secret-exfiltration, future-agent control, and persistent-rule patterns. It does not use an LLM and does not inspect existing notes retroactively. Quarantined records remain local in `<memory-home>/_system/quarantine/`, are excluded from normal search, session context, and the read-only MCP server, and can be reviewed explicitly with `memory quarantine`.
+
 ### Local usage statistics
 
 MemoryOS records small local usage events in `<memory-home>/_system/events/events-YYYY-MM.jsonl` by default. With the default home, that is `~/Memory/_system/events/`. They include command type, project, normalized query, result count, note IDs and titles returned or opened, learning disposition, and durations. They never include note bodies, prompts, agent answers, credentials, or network transmission.
@@ -241,6 +243,7 @@ MemoryOS stores decisions and outcomes rather than a raw conversation history. M
 
 - Core data stays on the local filesystem selected by `MEMORY_HOME`, or `~/Memory` by default.
 - High-confidence credentials are blocked on new writes by default. MemoryOS does not use a general high-entropy heuristic.
+- Suspicious instruction-like automated captures are quarantined before indexing. Review them explicitly; do not treat a normal search result as trusted instructions.
 - Do not commit a real memory folder, SQLite database, logs, exports, drafts, pending records, or `.env` files.
 - The optional `memory github-pr` command calls your local `gh` CLI. It does not send local MemoryOS notes to GitHub.
 

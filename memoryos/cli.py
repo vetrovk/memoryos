@@ -82,6 +82,17 @@ def build_parser() -> argparse.ArgumentParser:
     drop = add_home(drafts_sub.add_parser("drop"))
     drop.add_argument("id")
 
+    quarantine = add_home(sub.add_parser("quarantine", help="Review automated captures held outside search."))
+    quarantine_sub = quarantine.add_subparsers(dest="quarantine_command")
+    add_home(quarantine_sub.add_parser("list"))
+    quarantine_open = add_home(quarantine_sub.add_parser("open"))
+    quarantine_open.add_argument("id")
+    quarantine_release = add_home(quarantine_sub.add_parser("release"))
+    quarantine_release.add_argument("id")
+    add_credential_override(quarantine_release)
+    quarantine_drop = add_home(quarantine_sub.add_parser("drop"))
+    quarantine_drop.add_argument("id")
+
     add = add_home(sub.add_parser("add"))
     add.add_argument("--title", default="Untitled note")
     add.add_argument("--type", choices=OBJECT_TYPES + ["health"], default="idea")
@@ -284,7 +295,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         except ValueError as exc:
             parser.error(str(exc))
-        for key in ("roots", "found", "imported", "archived", "skipped", "errors", "dry_run"):
+        for key in ("roots", "found", "imported", "quarantined", "archived", "skipped", "errors", "dry_run"):
             value = report[key]
             print(f"{key}: {', '.join(value) if isinstance(value, list) else value}")
         for item in report["items"]:
@@ -320,7 +331,10 @@ def main(argv: list[str] | None = None) -> int:
                 allow_credentials=args.allow_credentials,
             )
             if args.dry_run:
-                print(memory.render_session_preview(result))
+                if hasattr(result, "learning"):
+                    print(memory.render_session_preview(result))
+                else:
+                    print(result.message)
             else:
                 print(result.message)
             return 1 if result.disposition in {"verification_failed", "fallback_failed", "credential_blocked"} else 0
@@ -449,6 +463,43 @@ def main(argv: list[str] | None = None) -> int:
         if draft_command == "drop":
             print(f"Dropped: {memory.drop_draft(args.id)}")
             return 0
+    if args.command == "quarantine":
+        quarantine_command = args.quarantine_command or "list"
+        if quarantine_command == "list":
+            records = memory.list_quarantine()
+            if not records:
+                print("No quarantined automated memory.")
+                return 0
+            for record in records:
+                print(
+                    f"{record['id']} | project={record['project'] or '-'} | "
+                    f"reason={record['reason'] or '-'} | provenance={record['provenance'] or '-'}"
+                )
+            return 0
+        if quarantine_command == "open":
+            try:
+                meta, body = memory.open_quarantine(args.id)
+            except (FileNotFoundError, ValueError) as exc:
+                parser.error(str(exc))
+            print(f"# {meta.get('title', args.id)}")
+            print()
+            print(body, end="" if body.endswith("\n") else "\n")
+            return 0
+        if quarantine_command == "release":
+            try:
+                path = memory.release_quarantine(args.id, allow_credentials=args.allow_credentials)
+            except (CredentialDetectedError, FileNotFoundError, ValueError) as exc:
+                print(str(exc))
+                return 1
+            print(f"Released: {path}")
+            return 0
+        if quarantine_command == "drop":
+            try:
+                path = memory.drop_quarantine(args.id)
+            except FileNotFoundError as exc:
+                parser.error(str(exc))
+            print(f"Dropped: {path}")
+            return 0
     if args.command == "agents":
         mode = args.project if args.project in {"audit", "sync"} else ""
         if mode:
@@ -559,7 +610,7 @@ def _render_usage_stats(report: dict[str, object]) -> str:
     lines.extend(["", "## Notes"])
     lines.append(f"Opened: {notes['opened']} | applied: {notes['used']} | unique notes opened repeatedly: {notes['unique_opened_repeatedly']}")
     lines.extend(["", "## Learning"])
-    lines.append(f"Attempted: {learning['attempted']} | saved: {learning['saved']} | skipped: {learning['skipped']} | failed: {learning['failed']}")
+    lines.append(f"Attempted: {learning['attempted']} | saved: {learning['saved']} | skipped: {learning['skipped']} | quarantined: {learning['quarantined']} | failed: {learning['failed']}")
     lines.extend(["", "## Top projects"])
     projects = report["top_projects"]
     assert isinstance(projects, list)

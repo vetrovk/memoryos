@@ -25,6 +25,7 @@ memory import ~/Projects/OmniBot --project omnibot
 memory import-pending --dry-run
 memory learn --from-session --actor codex --source codex
 memory drafts
+memory quarantine
 memory github-pr https://github.com/owner/repo/pull/123
 memory github-pr-deduplicate --dry-run
 memory oss-candidate upsert --from-json candidate.json --actor codex --source oss-scout
@@ -208,6 +209,19 @@ memory learn --project local --goal "Document a local fixture" --finding "api_ke
 memory import-pending --path "/path/to/projects" --allow-credentials
 ```
 
+### Automated-capture quarantine
+
+`memory learn --from-session` and `memory import-pending` apply a small deterministic safety gate before Curator, deduplication, or SQLite indexing. It quarantines only high-confidence instruction-like patterns: direct instruction override, requests to expose secrets, attempts to control future agents, and requests to persist such rules. It is not an LLM classifier and does not scan or rewrite existing notes.
+
+```bash
+memory quarantine
+memory quarantine open <id>
+memory quarantine release <id>
+memory quarantine drop <id>
+```
+
+Quarantined Markdown records live in `<memory-home>/_system/quarantine/`. They preserve the original local capture but are deliberately absent from `memory search`, `memory context`, and the read-only MCP tools. `open` is an explicit review action. `release` moves a reviewed record through the normal local learning write path; `drop` removes only that quarantine record. CLI status and telemetry record reason codes, never the matched text.
+
 The same flag is available for `memory add`, `memory import`, `memory github-pr`, `memory learn --from-github-pr`, `memory oss-candidate upsert`, and `memory drafts promote`. Existing notes are not scanned or rewritten automatically.
 
 ## `memory rebuild`
@@ -226,7 +240,7 @@ memory import-pending --dry-run --path "/path/to/projects"
 memory import-pending --path "/path/to/projects"
 ```
 
-`--dry-run` does not save notes or move files. A successful import verifies the SQLite note, then moves the source to `.memoryos_pending/archive/`. Files blocked by the credential guard remain in place and are reported as skipped without writing the detected value to logs or telemetry. Other failed files remain in place and are recorded in `memory.log`; one bad JSON file does not stop the batch. The local SHA-256 state file prevents re-importing a copied or retried record.
+`--dry-run` does not save notes or move files. A successful import verifies the SQLite note, then moves the source to `.memoryos_pending/archive/`. Files blocked by the credential guard remain in place and are reported as skipped without writing the detected value to logs or telemetry. High-confidence instruction-like captures are instead copied into local quarantine and then archived, without entering the index. Other failed files remain in place and are recorded in `memory.log`; one bad JSON file does not stop the batch. The local SHA-256 state file prevents re-importing a copied or retried record.
 
 `memory doctor` performs a small SQLite write-and-rollback check. When direct writing is unavailable, it reports `DIRECT_WRITE_UNAVAILABLE` and points to the session pending fallback instead of treating the failure as an unexplained database problem.
 

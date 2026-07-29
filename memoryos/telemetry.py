@@ -145,6 +145,7 @@ def usage_summary(home: Path, days: int | None = None, project: str = "") -> dic
             "attempted": sum(event.get("event") == "learning_attempted" for event in learning),
             "saved": sum(event.get("event") == "learning_saved" for event in learning),
             "skipped": sum(event.get("event") == "learning_skipped" for event in learning),
+            "quarantined": sum(event.get("event") == "learning_quarantined" for event in learning),
             "failed": sum(event.get("event") == "learning_failed" for event in learning),
         },
         "top_projects": [{"project": name, "events": count} for name, count in project_counts.most_common(10)],
