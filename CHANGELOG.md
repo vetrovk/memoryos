@@ -2,6 +2,17 @@
 
 All notable public changes to MemoryOS are documented here.
 
+## [0.6.1] - 2026-08-07
+
+### Added
+
+- Opt-in lazy Validation Program snapshots. The first regular CLI invocation after a due date writes one local snapshot.
+
+### Changed
+
+- Validation snapshots no longer require LaunchAgent, cron, a daemon, or a background service.
+- Validation remains local-first; snapshots contain only safe aggregate usage data and Curator metadata.
+
 ## [0.6.0] - 2026-07-29
 
 ### Added

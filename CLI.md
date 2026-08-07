@@ -1,6 +1,6 @@
 # MemoryOS CLI
 
-This reference matches MemoryOS v0.6.0 Public Beta.
+This reference matches MemoryOS v0.6.1 Public Beta.
 
 Primary command:
 
