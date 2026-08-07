@@ -11,6 +11,7 @@ from .config import OBJECT_TYPES
 from .credentials import CredentialDetectedError
 from .models import NoteInput, TaskLearningInput
 from .util import split_tags
+from .validation import maybe_write_snapshot
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -182,6 +183,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     memory = Memory(getattr(args, "home_after", None) or args.home)
+    maybe_write_snapshot(memory.home)
 
     if args.command == "init":
         info = memory.init()
